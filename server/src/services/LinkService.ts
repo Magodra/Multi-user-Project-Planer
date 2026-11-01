@@ -23,8 +23,8 @@ export class LinkService {
 
   /**
    * Set the link type of one reference (MONITOR or AGREEMENT), optionally with
-   * extra approving parties. Needs the owner plan's manage right; an upgrade
-   * carries over agreed values without an approval round.
+   * extra approving parties. Managers of the owner or the receiving plan may
+   * do it; an upgrade carries over agreed values without an approval round.
    */
   async setReferenceType(
     ctx: ServiceContext,
@@ -33,7 +33,8 @@ export class LinkService {
   ): Promise<PlanLink> {
     const ref = await mustGet(this.storage, "planItemReference", referenceId);
     const owner = await mustGet(this.storage, "plan", ref.ownerPlanId);
-    await this.access.require(ctx, owner.projectId, owner.id, "plan.manage");
+    const recipient = await mustGet(this.storage, "plan", ref.planId);
+    await this.access.requireLinkManager(ctx, owner, recipient);
     const link = await this.storage.transaction(async (tx) =>
       setReferenceLinkType(
         tx,

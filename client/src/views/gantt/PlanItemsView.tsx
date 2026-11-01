@@ -7,7 +7,7 @@ import { formatForDisplay, type Task } from "@planning/shared";
 import { type StatusBadge, itemBadges } from "../../components/status";
 import { Badge, ErrorText } from "../../components/ui";
 import { usePlanView } from "../../workspace/ProjectContext";
-import { planRows } from "./planRows";
+import { planRows, referenceName } from "./planRows";
 import { type PlanItemDragData, usePlanDropTarget } from "../../workspace/panels";
 
 function DraggableItem({
@@ -17,6 +17,7 @@ function DraggableItem({
   kind,
   number,
   badges,
+  displayName,
 }: {
   task: Task;
   planId: string;
@@ -26,12 +27,15 @@ function DraggableItem({
   number?: number;
   /** Ownership badges: EXT for this plan's external tasks, REF + link type for references. */
   badges: StatusBadge[];
+  /** Shown name; for an external task it includes its owner plan. */
+  displayName?: string;
 }) {
+  const name = displayName ?? task.name;
   const data: PlanItemDragData = {
     type: "plan-item",
     itemId: task.id,
     planId,
-    name: task.name,
+    name,
     external: task.ownership === "EXTERNAL",
   };
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
@@ -51,7 +55,7 @@ function DraggableItem({
       </span>
       <span className={`pp-kind-dot pp-kind-${kind}`} />
       <span className="pp-outline-id">{number ?? ""}</span>
-      <span className="pp-outline-name">{task.name}</span>
+      <span className="pp-outline-name">{name}</span>
       {badges.map((b) => (
         <Badge key={b.label} className={b.className} title={b.title}>
           {b.label}
@@ -101,9 +105,10 @@ export function PlanItemsView({ planId }: { planId: string }) {
             <DraggableItem
               key={row.reference.id}
               task={row.reference.item}
+              displayName={referenceName(row.reference)}
               planId={row.reference.ownerPlanId}
               depth={row.depth}
-              kind={row.reference.item.duration === 0 ? "milestone" : "task"}
+              kind={row.reference.itemKind}
               number={row.reference.taskNumber}
               badges={ownershipBadges({
                 external: true,

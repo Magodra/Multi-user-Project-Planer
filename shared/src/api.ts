@@ -69,6 +69,10 @@ export interface ProjectSummary extends Project {
 export interface ResolvedReference extends PlanItemReference {
   item: Task;
   linkType: LinkType;
+  /** Name of the plan that owns the task (it may belong to another project of the tree). */
+  ownerPlanName: string;
+  /** The task's kind in its owner plan: an activity's dates follow its subtasks there. */
+  itemKind: ItemKind;
 }
 
 export interface PlanView {

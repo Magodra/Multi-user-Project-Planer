@@ -11,12 +11,15 @@ import type { Plan, ProjectSummary } from "@planning/shared";
 import { api } from "../../api/client";
 import { Badge, ErrorText } from "../../components/ui";
 import { withoutInactiveSubtrees } from "../../pages/projectTree";
+import { PlanDialog } from "./PlanDialog";
 import { useLive, useProject } from "../../workspace/ProjectContext";
 import { useWorkspaceActions } from "../../workspace/panels";
 
 export function ProjectStructure() {
   const { project, plans } = useProject();
-  const { openPanel, expandedProjectIds, setProjectExpanded } = useWorkspaceActions();
+  const { openPanel, expandedProjectIds, setProjectExpanded, planChanged } = useWorkspaceActions();
+  const { reloadPlans } = useProject();
+  const [editing, setEditing] = useState<{ plan: Plan; projectId: string } | null>(null);
   const { data: projects, error } = useLive(
     () => api.projects.list(),
     (c) => c.entityType === "project",
@@ -102,6 +105,14 @@ export function ProjectStructure() {
                       {plan.name}
                     </button>
                     <span className="pp-hint">{plan.planType}</span>
+                    <button
+                      type="button"
+                      className="pp-link pp-tree-edit"
+                      aria-label={`Edit plan ${plan.name}`}
+                      onClick={() => setEditing({ plan, projectId: id })}
+                    >
+                      Edit
+                    </button>
                   </div>
                 </li>
               ))}
@@ -123,6 +134,23 @@ export function ProjectStructure() {
       <ul role="tree" aria-label="Project structure" className="pp-tree">
         {renderNode(visible.find((p) => p.id === project.id) ?? null, 0)}
       </ul>
+      {editing && (
+        <PlanDialog
+          plan={editing.plan}
+          onClose={() => setEditing(null)}
+          onChanged={(deleted, name) => {
+            planChanged(editing.plan.id, editing.plan.name, deleted ? null : name);
+            setEditing(null);
+            // Reload the plan list of the project that changed.
+            if (editing.projectId === project.id) void reloadPlans();
+            else
+              setSubPlans((s) => {
+                const { [editing.projectId]: _dropped, ...rest } = s;
+                return rest;
+              });
+          }}
+        />
+      )}
     </>
   );
 }

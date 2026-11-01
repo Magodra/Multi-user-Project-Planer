@@ -176,6 +176,96 @@ describe.each(serviceBackends)("services on $name", (backend) => {
       expect(await f.services.workspaces.list(f.bob, f.project.id)).toEqual([]);
     });
 
+    it("renames a plan and deletes it with everything that belongs only to it", async () => {
+      const renamed = await f.services.plans.update(f.alice, f.planA.id, {
+        version: f.planA.version,
+        name: "Contract v2",
+        planType: "contract",
+      });
+      expect(renamed).toMatchObject({ name: "Contract v2", planType: "contract" });
+      const a = await f.task("A");
+      const b = await f.task("B");
+      await f.services.items.setPredecessors(f.alice, b.id, { predecessors: "1" });
+      await acceptToCurrent(f.planA.id, [a.id]); // resolved request + unlocked track
+      const tl = await f.services.timelines.create(f.alice, f.project.id, {
+        name: "Roadmap",
+        start: MONDAY,
+        end: "2026-12-31T00:00:00.000Z",
+        scale: "months",
+        rows: [{ id: "r1", name: "Row" }],
+      });
+      await f.services.timelines.update(f.alice, tl.id, {
+        version: tl.version,
+        entries: [{ id: "e1", rowId: "r1", itemId: a.id, planId: f.planA.id }],
+      });
+      const def = await f.services.reports.create(f.alice, f.project.id, {
+        name: "Status",
+        planIds: [f.planA.id, f.planB.id],
+        timelineIds: [],
+        baselineIds: [],
+        rangeStart: null,
+        rangeEnd: null,
+        granularity: "days",
+        filter: {},
+      });
+
+      // Only the plan's owners (and admins) may delete it.
+      await expect(
+        f.services.plans.delete(f.bob, f.planA.id, renamed.version),
+      ).rejects.toBeInstanceOf(ForbiddenError);
+      await f.services.plans.delete(f.alice, f.planA.id, renamed.version);
+      expect(await storage.get("plan", f.planA.id)).toBeNull();
+      expect(await storage.query("task", { projectId: f.project.id, planId: f.planA.id })).toEqual(
+        [],
+      );
+      expect(await storage.query("dependency", { toItemId: b.id })).toEqual([]);
+      expect(
+        await storage.query("baseline", { projectId: f.project.id, planId: f.planA.id }),
+      ).toEqual([]);
+      expect((await storage.get("timeline", tl.id))?.entries).toEqual([]);
+      expect((await storage.get("reportDefinition", def.id))?.planIds).toEqual([f.planB.id]);
+      const audit = await f.services.audit.list(f.admin, f.project.id, f.planA.id);
+      expect(audit.map((e) => e.action)).toContain("delete");
+    });
+
+    it("refuses to delete a plan whose tasks are used elsewhere, with open requests or history", async () => {
+      const used = await f.task("Shared", { ownership: "EXTERNAL" });
+      const ref = await f.services.items.addReference(f.bob, {
+        itemId: used.id,
+        planId: f.planB.id,
+      });
+      const del = async (ctx = f.alice, planId = f.planA.id) =>
+        f.services.plans.delete(ctx, planId, (await storage.get("plan", planId))!.version);
+      await expect(del()).rejects.toThrow(`used in other plans (${f.planB.name})`);
+      await f.services.items.removeReference(f.bob, ref.id);
+
+      const { changeRequest } = await f.services.changeRequests.create(f.alice, {
+        planId: f.planA.id,
+        targetTrack: "CURRENT",
+        itemIds: [used.id],
+        sourceBaselineId: null,
+        title: "Open",
+        description: "",
+      });
+      await expect(del()).rejects.toThrow(/still open/);
+      await f.services.changeRequests.withdraw(f.alice, changeRequest.id);
+
+      await f.services.baselines.create(f.alice, {
+        planId: f.planA.id,
+        name: "Q1",
+        kind: "SNAPSHOT",
+        fromBaselineId: null,
+        lock: true,
+      });
+      await expect(del()).rejects.toThrow(/locked baseline/);
+
+      // A plan that only uses other plans' tasks can go; its uses go with it.
+      const other = await f.task("Other", { ownership: "EXTERNAL" });
+      await f.services.items.addReference(f.bob, { itemId: other.id, planId: f.planB.id });
+      await del(f.bob, f.planB.id);
+      expect(await storage.query("planItemReference", { itemId: other.id })).toEqual([]);
+    });
+
     it("enforces access control", async () => {
       await expect(f.services.plans.getView(f.outsider, f.planA.id)).rejects.toBeInstanceOf(
         ForbiddenError,
@@ -666,6 +756,26 @@ describe.each(serviceBackends)("services on $name", (backend) => {
       expect(a.id).toBeTruthy();
     });
 
+    it("updates plans using an activity when its subtasks move", async () => {
+      const phase = await f.task("Phase", { ownership: "EXTERNAL" });
+      const step = await f.task("Step", { parentId: phase.id, duration: 2 });
+      await f.services.items.addReference(f.bob, { itemId: phase.id, planId: f.planB.id });
+      const view = await f.services.plans.getView(f.bob, f.planB.id);
+      expect(view.references[0]?.itemKind).toBe("activity");
+
+      const events: { planIds: string[]; entityId: string }[] = [];
+      const off = f.services.events.subscribe((e) => events.push(e));
+      await f.services.items.move(f.alice, step.id, {
+        version: step.version,
+        start: "2026-02-02T00:00:00.000Z",
+      });
+      off();
+      // The moved subtask's event reaches the plan using its activity.
+      expect(events.find((e) => e.entityId === step.id)?.planIds).toContain(f.planB.id);
+      const after = await f.services.plans.getView(f.bob, f.planB.id);
+      expect(after.references[0]?.item.start).toBe("2026-02-02T00:00:00.000Z");
+    });
+
     it("refuses local changes to a monitored task", async () => {
       const { ref } = await placedReference();
       await expect(
@@ -795,6 +905,7 @@ describe.each(serviceBackends)("services on $name", (backend) => {
       expect(ref.projectId).toBe(sub.project.id);
       const subView = await f.services.plans.getView(f.carol, sub.plan.id);
       expect(subView.references.map((r) => r.item.name)).toEqual(["Interface"]);
+      expect(subView.references[0]?.ownerPlanName).toBe(f.planA.name);
       const ownerView = await f.services.plans.getView(f.alice, f.planA.id);
       expect(ownerView.recipients[task.id]).toEqual([
         expect.objectContaining({
@@ -929,10 +1040,14 @@ describe.each(serviceBackends)("services on $name", (backend) => {
           ]),
         );
       expect(await types()).toEqual({ Monitored: "MONITOR", Agreed: "AGREEMENT" });
-      // Only the owner plan's managers can bind it with an agreement.
+      // Only managers of the owner or the receiving plan can set the type.
       await expect(
-        f.services.links.setReferenceType(f.carol, ref.id, { type: "AGREEMENT" }),
+        f.services.links.setReferenceType(f.bob, ref.id, { type: "AGREEMENT" }),
       ).rejects.toBeInstanceOf(ForbiddenError);
+      // The receiving plan's owner (carol) may upgrade from its side.
+      await f.services.links.setReferenceType(f.carol, ref.id, { type: "AGREEMENT" });
+      expect((await types()).Monitored).toBe("AGREEMENT");
+      await f.services.links.setReferenceType(f.carol, ref.id, { type: "MONITOR" });
       await f.services.links.setReferenceType(f.alice, ref.id, { type: "AGREEMENT" });
       expect(await types()).toEqual({ Monitored: "AGREEMENT", Agreed: "AGREEMENT" });
       // And back: a downgrade to MONITOR.

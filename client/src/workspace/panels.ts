@@ -20,12 +20,15 @@ export interface WorkspaceActions {
   /** Projects expanded in the Project panel's tree (saved with the workspace). */
   expandedProjectIds: string[];
   setProjectExpanded(projectId: string, expanded: boolean): void;
+  /** A plan was renamed (`newName`) or deleted (null): retitle or close its panels. */
+  planChanged(planId: string, oldName: string, newName: string | null): void;
 }
 
 export const WorkspaceActionsContext = createContext<WorkspaceActions>({
   openPanel: () => undefined,
   expandedProjectIds: [],
   setProjectExpanded: () => undefined,
+  planChanged: () => undefined,
 });
 
 export function useWorkspaceActions(): WorkspaceActions {

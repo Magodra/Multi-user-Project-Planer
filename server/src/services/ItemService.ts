@@ -45,6 +45,7 @@ import {
   saveTaskChange,
   setReferenceLinkType,
   supersedeOpenRequests,
+  taskChangeAudience,
 } from "./workflow.js";
 
 /** A task as shown in one plan: own task or external task, with its local ID and parent. */
@@ -195,7 +196,7 @@ export class ItemService {
       await this.afterChange(tx, ctx, task, updated, project.calendar, "move", input);
       return mustGet(tx, "task", itemId);
     });
-    this.events.emit(await this.eventFor(saved, "move"));
+    this.events.emit(await this.eventFor(saved, "move", existing));
     return saved;
   }
 
@@ -268,9 +269,13 @@ export class ItemService {
     await this.access.require(ctx, plan.projectId, plan.id, "plan.edit");
     // External items are shared by design: project membership is enough to use one.
     await this.access.require(ctx, item.projectId, null, "project.read");
-    // Choosing AGREEMENT binds the owner: it needs the owner plan's manage right (as for links).
+    // Choosing AGREEMENT binds both plans: managers of either may do it.
     if (input.linkType === "AGREEMENT")
-      await this.access.require(ctx, item.projectId, item.planId, "plan.manage");
+      await this.access.requireLinkManager(
+        ctx,
+        { projectId: item.projectId, id: item.planId },
+        plan,
+      );
     if (item.ownership !== "EXTERNAL")
       throw new RuleViolationError("Only external tasks can be used in other plans");
     if (item.planId === plan.id)
@@ -801,15 +806,17 @@ export class ItemService {
     return out;
   }
 
-  /** Changes to an external item are pushed to every recipient plan (MONITOR and AGREEMENT), in any project. */
-  private async eventFor(task: Task, action: string): Promise<ChangeEvent[]> {
-    const refs = await this.storage.query("planItemReference", { itemId: task.id });
-    return perProject([task.projectId, ...refs.map((r) => r.projectId)], {
-      entityType: "task",
-      entityId: task.id,
-      action,
-      planIds: [...new Set([task.planId, ...refs.map((r) => r.planId)])],
-    });
+  /**
+   * Changes are pushed to every plan using the task or one of its activities
+   * (their dates roll up), in any project. `before` adds the activities a
+   * moved task left.
+   */
+  private async eventFor(task: Task, action: string, before?: Task): Promise<ChangeEvent[]> {
+    const { projectIds, planIds } = await taskChangeAudience(
+      this.storage,
+      before ? [task, before] : [task],
+    );
+    return perProject(projectIds, { entityType: "task", entityId: task.id, action, planIds });
   }
 }
 

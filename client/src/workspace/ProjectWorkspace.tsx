@@ -121,13 +121,23 @@ export function ProjectWorkspace() {
     },
     [saveLayout],
   );
+  const planChanged = useCallback((planId: string, oldName: string, newName: string | null) => {
+    const dock = dockRef.current;
+    if (!dock) return;
+    for (const panel of [...dock.panels]) {
+      if ((panel.params as { planId?: string } | undefined)?.planId !== planId) continue;
+      if (newName === null) panel.api.close();
+      else panel.api.setTitle(panel.title?.replace(oldName, newName) ?? newName);
+    }
+  }, []);
   const actions = useMemo(
     () => ({
       openPanel,
       expandedProjectIds: viewState.expandedProjectIds,
       setProjectExpanded,
+      planChanged,
     }),
-    [openPanel, viewState, setProjectExpanded],
+    [openPanel, viewState, setProjectExpanded, planChanged],
   );
 
   const onReady = useCallback(

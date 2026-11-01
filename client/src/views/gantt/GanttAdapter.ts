@@ -264,7 +264,10 @@ export function createGanttAdapter(callbacks: GanttCallbacks): GanttAdapter {
       const today = document.createElement("div");
       today.className = "pp-today-line";
       today.style.left = `${gantt.posFromDate(now)}px`;
-      today.style.height = `${Math.max(taskData.scrollHeight, taskData.clientHeight)}px`;
+      // From the rows, not scrollHeight: the line itself counts in scrollHeight, so
+      // using it can keep growing the scrollable area (and trigger re-layouts).
+      const rowsHeight = gantt.getVisibleTaskCount() * gantt.config.row_height;
+      today.style.height = `${Math.max(rowsHeight, taskData.clientHeight)}px`;
       today.title = `Today, ${now.toLocaleString()}`;
       fragment.appendChild(today);
     }
@@ -319,17 +322,18 @@ export function createGanttAdapter(callbacks: GanttCallbacks): GanttAdapter {
   // (losing the listener) when Dockview moves the panel to another group. A
   // ResizeObserver on our own container keeps working wherever it is moved.
   let frame = 0;
-  let lastSize = "";
+  let last: { width: number; height: number } | null = null;
   const resizeObserver = new ResizeObserver(([entry]) => {
     const { width, height } = entry?.contentRect ?? { width: 0, height: 0 };
-    const size = `${Math.round(width)}x${Math.round(height)}`;
     if (width === 0 || height === 0) {
       // Hidden tab: data updated meanwhile is drawn when the tab is shown again.
-      lastSize = "";
+      last = null;
       return;
     }
-    if (size === lastSize) return;
-    lastSize = size;
+    // Ignore sub-pixel changes: with fractional display scaling a redraw can
+    // nudge sizes by a fraction of a pixel, which must not start another redraw.
+    if (last && Math.abs(width - last.width) < 1 && Math.abs(height - last.height) < 1) return;
+    last = { width, height };
     cancelAnimationFrame(frame);
     frame = requestAnimationFrame(() => gantt.render());
   });
@@ -348,6 +352,7 @@ export function createGanttAdapter(callbacks: GanttCallbacks): GanttAdapter {
       suppressLinkEvents = true;
       gantt.clearAll();
       applyScale();
+      const parents = new Set(rows.map((r) => r.parent));
       gantt.parse({
         data: rows.map((r) => ({
           id: r.id,
@@ -355,10 +360,13 @@ export function createGanttAdapter(callbacks: GanttCallbacks): GanttAdapter {
           parent: r.parent ?? 0,
           start_date: r.start,
           end_date: r.kind === "milestone" ? r.start : r.end,
+          // DHTMLX "project" bars span their child rows. An activity without
+          // child rows here (an external activity, whose subtasks live in its
+          // owner plan) is drawn as a task bar with its own dates instead.
           type:
             r.kind === "milestone"
               ? "milestone"
-              : r.kind === "activity" || r.kind === "group"
+              : (r.kind === "activity" || r.kind === "group") && parents.has(r.id)
                 ? "project"
                 : "task",
           open: true,

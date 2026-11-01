@@ -150,6 +150,14 @@ export function apiRoutes(s: Services): Router {
     "/plans/:id",
     async (req, res) => void res.json(await s.plans.get(ctxOf(req), p(req, "id"))),
   );
+  r.delete("/plans/:id", async (req, res) => {
+    await s.plans.delete(
+      ctxOf(req),
+      p(req, "id"),
+      version.parse({ version: Number(q(req, "version")) }).version,
+    );
+    res.status(204).end();
+  });
   r.patch(
     "/plans/:id",
     async (req, res) =>

@@ -229,6 +229,15 @@ There is one item entity, the **Task**. Its kind follows from its data:
 - Dependencies may not form a loop, and a task cannot be linked to its own activity or subtasks (`/server/domain/dependencies`). Both apply to links drawn in the Gantt as well.
 - Dependencies stored before `lagUnit` existed read with the successor's granularity (`normalizeDependency`).
 
+### Editing and deleting plans
+
+- A plan's name, type and description are edited from the Project panel's structure tree (Edit → plan dialog); open panels of the plan are retitled.
+- **Deleting a plan** (`PlanService.delete`, after confirmation, plan owners and admins) is permanent and refused while (`assertPlanDeletable`):
+  - its tasks are used in other plans;
+  - change requests involving it are open;
+  - it has locked baselines, because accepted history is never removed.
+- Otherwise the plan's own data goes with it: tasks and their dependencies, its references to other plans' tasks (with their links), unlocked baselines, its resolved change requests with their approvals, and plan-specific role assignments. Timelines and report definitions drop the plan; the AuditLog keeps a `delete` entry. Open panels of the plan are closed.
+
 ### Internal vs. external items
 
 - **Internal**: visible and editable only within its own plan.
@@ -236,7 +245,7 @@ There is one item entity, the **Task**. Its kind follows from its data:
   - Changes are always made in the owner plan.
   - Recipient plans always see the owner's current values (live), but can compare against their own agreed baseline.
   - In the recipient plan a reference is placed among the local tasks: under a local task (`parentId`) or at the top level, ordered together with the tasks (`sortOrder` is shared). A local task with references under it is an activity and rolls up their dates; when the owner changes the task, recipient plans that placed it under an activity are rolled up too (`rollUpPlan`). A milestone cannot hold references.
-  - Name, start, duration and unit always come from the owner's task. On a **MONITOR** reference they cannot be changed in the recipient plan. On an **AGREEMENT** reference a local change (dialog or dragging the bar) creates a ChangeRequest of kind `PROPOSE_TASK_CHANGE` with one Approval for the owner plan (approvers of the Estimated definition). Approval applies the values to the owner's task; rejection changes nothing. A newer proposal from the same plan, or any change to the task by its owner, supersedes it.
+  - Name, start, duration and unit always come from the owner's task. In the recipient plan it is shown as "Name (from Owner plan)" (`ResolvedReference.ownerPlanName`). On a **MONITOR** reference they cannot be changed in the recipient plan. On an **AGREEMENT** reference a local change (dialog or dragging the bar) creates a ChangeRequest of kind `PROPOSE_TASK_CHANGE` with one Approval for the owner plan (approvers of the Estimated definition). Approval applies the values to the owner's task; rejection changes nothing. A newer proposal from the same plan, or any change to the task by its owner, supersedes it.
 
 ### Link types (per PlanLink)
 
@@ -253,12 +262,12 @@ Implementation notes:
 
 - A reference's type comes from its own link; with no link it is MONITOR (`effectiveLinkType`). Plan-level links (one type for every reference between two plans) were removed: stored ones are converted once at startup into links per reference (`LinkService.convertPlanLevelLinks`), so no reference changes type.
 - "Carry over" on upgrade copies the owner plan's Agreed-track values into the recipient's Agreed track for referenced items that have no agreed value there yet.
-- Using an external item in another plan requires edit rights on the recipient plan and membership of the owner's project — not read access to the owner plan. Choosing AGREEMENT for a reference (or upgrading one) needs the owner plan's manage right, like any link.
+- Using an external item in another plan requires edit rights on the recipient plan and membership of the owner's project — not read access to the owner plan. Choosing AGREEMENT for a reference, or changing its type, needs the manage right on the owner plan **or** the receiving plan (`AccessService.requireLinkManager`): the link binds both sides.
 - **Across the project tree**: an external task can be used in plans of any project in the same tree (its parents and subprojects; `assertSameProjectTree`). `ItemService.referenceTargets` lists the plans a user may add it to.
   - A TaskReference, and a link for that one task, are stored with the **recipient plan's project**.
   - An Approval is stored with the **deciding plan's project**, so its members see it in their inbox and their roles are checked there. Look approvals up by `changeRequestId`, track baselines by `planId` (`findTrackBaseline`), and references to a task by `itemId` (`referencesOf`), never scoped to one project.
-  - Change events are emitted once per project involved (`perProject`), so every workspace showing an affected plan updates live.
-- **Reference type**: when a task is added to another plan, MONITOR or AGREEMENT can be chosen. The choice is stored as the reference's link (`setReferenceLinkType`); the default is MONITOR. In the owner's task dialog a MONITOR reference can be upgraded to AGREEMENT and an AGREEMENT reference downgraded to MONITOR. Extra approving parties can be set through the API (`partyIds`).
+  - Change events are emitted once per project involved (`perProject`), so every workspace showing an affected plan updates live. A task change reaches every plan using the task **or one of its activities**, since activity dates roll up (`taskChangeAudience`). An external task that is an activity in its owner plan is shown and locked as an activity in plans using it (`ResolvedReference.itemKind`).
+- **Reference type**: when a task is added to another plan, MONITOR or AGREEMENT can be chosen. The choice is stored as the reference's link (`setReferenceLinkType`); the default is MONITOR. In the owner's task dialog a MONITOR reference can be upgraded to AGREEMENT and an AGREEMENT reference downgraded to MONITOR; the receiving plan's external-task dialog offers the upgrade too. Extra approving parties can be set through the API (`partyIds`).
 
 ### Tracks and agreement state (as implemented)
 
@@ -354,7 +363,7 @@ Each project starts with three definitions (Estimated, Current, Agreed); see `de
   - **Markers**, **undo/redo**, **multi-select and horizontal drag** — implement in our own UI layer if needed.
 - Auto-scheduling, critical path and resources are out of scope for the Gantt component; any scheduling logic lives in `/server/services`.
 - Keep all DHTMLX-specific code behind an adapter in `/client/views/gantt` so the library can be replaced (or upgraded to PRO) without touching the rest of the client.
-- **Panel resizes**: Dockview resizes panels and moves them between groups without a window resize. DHTMLX's own size watcher (a hidden iframe) stops working once the panel is moved, so the adapter re-renders from a `ResizeObserver` on its container; the calendar view does the same with FullCalendar's `updateSize()`. Any other view that measures its container needs the same.
+- **Panel resizes**: Dockview resizes panels and moves them between groups without a window resize. DHTMLX's own size watcher (a hidden iframe) stops working once the panel is moved, so the adapter re-renders from a `ResizeObserver` on its container; the calendar view does the same with FullCalendar's `updateSize()`. Any other view that measures its container needs the same. Guard against re-layout loops: ignore size changes under 1px (fractional display scaling), never derive a size from a `scrollHeight` the element itself contributes to, and keep the workspace page from scrolling (`body:has(.pp-workspace)`), since a page scrollbar's width shifts every panel.
 - Do not modify the library source in place. If a patch is unavoidable, keep it in `/client/vendor-patches` with a note explaining why.
 
 ## 8. Reports
@@ -386,7 +395,7 @@ interface StorageAdapter {
 - **Optimistic locking**: `save` fails with `ConflictError` if `version` does not match. `version: 0` means create; the stored version is then 1.
 - `query` accepts equality filters only on the fields listed in `QUERYABLE_FIELDS` (both adapters enforce the same list). Results are ordered by id.
 - Inside `transaction(fn)`, use only the `tx` adapter passed to `fn`. SQLite has a single connection, so calling the outer adapter inside a transaction deadlocks.
-- The audit log is append-only at the storage level: updating or deleting entries fails.
+- The audit log is append-only at the storage level: updating or deleting entries fails. Entry ids are time-ordered (UUIDv7 with a counter, `timeOrderedId`), so entries written in the same millisecond keep their order.
 
 ### FileAdapter
 

@@ -47,6 +47,7 @@ import {
   rollUpPlan,
   saveTaskChange,
   supersedeOpenRequests,
+  taskChangeAudience,
   updateAgreementStates,
 } from "./workflow.js";
 
@@ -646,17 +647,17 @@ export class ChangeRequestService {
     return { items: track?.items ?? [], label: `the ${acceptFrom} track` };
   }
 
-  /** An approved proposal changed the owner's task: notify the owner and every recipient plan. */
+  /** An approved proposal changed the owner's task: notify every plan showing it or its activities. */
   private async emitTaskChange(projectId: string, itemId: string): Promise<void> {
     const task = await this.storage.get("task", itemId);
     if (!task) return;
-    const refs = await this.storage.query("planItemReference", { itemId });
+    const { projectIds, planIds } = await taskChangeAudience(this.storage, [task]);
     this.events.emit(
-      perProject([projectId, task.projectId, ...refs.map((r) => r.projectId)], {
+      perProject([projectId, ...projectIds], {
         entityType: "task",
         entityId: itemId,
         action: "update",
-        planIds: [...new Set([task.planId, ...refs.map((r) => r.planId)])],
+        planIds,
       }),
     );
   }

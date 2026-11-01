@@ -9,20 +9,23 @@ import { type PlanView, inclusiveEnd, toDisplayDate } from "@planning/shared";
 import { api } from "../../api/client";
 import { ErrorText } from "../../components/ui";
 import { useLive, useProject } from "../../workspace/ProjectContext";
+import { referenceName } from "../gantt/planRows";
 
 const PALETTE = ["#2f6fde", "#16a34a", "#c2410c", "#7c3aed", "#0891b2", "#be123c"];
 
 function toEvents(view: PlanView, color: string): EventInput[] {
   const tasks = [
-    ...view.items.filter((t) => view.kinds[t.id] !== "activity"),
-    ...view.references.map((r) => r.item),
+    ...view.items.filter((t) => view.kinds[t.id] !== "activity").map((t) => ({ t, name: t.name })),
+    ...view.references
+      .filter((r) => r.itemKind !== "activity")
+      .map((r) => ({ t: r.item, name: referenceName(r) })),
   ];
-  return tasks.map((t) => {
+  return tasks.map(({ t, name }) => {
     const milestone = t.duration === 0;
     const allDay = t.granularity !== "hours";
     return {
       id: `${view.plan.id}:${t.id}`,
-      title: milestone ? `◆ ${t.name}` : t.name,
+      title: milestone ? `◆ ${name}` : name,
       start: toDisplayDate(t.start, t.granularity),
       // FullCalendar treats all-day ends as exclusive dates, matching our storage.
       end: milestone
@@ -58,7 +61,16 @@ export function CalendarView({ planIds: initial }: { planIds: string[] }) {
     const panel = panelRef.current;
     if (!panel) return;
     let frame = 0;
-    const observer = new ResizeObserver(() => {
+    let last: { width: number; height: number } | null = null;
+    const observer = new ResizeObserver(([entry]) => {
+      const { width, height } = entry?.contentRect ?? { width: 0, height: 0 };
+      if (width === 0 || height === 0) {
+        last = null; // hidden tab
+        return;
+      }
+      // Ignore sub-pixel changes (fractional display scaling) to avoid re-layout loops.
+      if (last && Math.abs(width - last.width) < 1 && Math.abs(height - last.height) < 1) return;
+      last = { width, height };
       cancelAnimationFrame(frame);
       frame = requestAnimationFrame(() => calendarRef.current?.getApi().updateSize());
     });

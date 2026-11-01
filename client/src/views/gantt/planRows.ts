@@ -56,3 +56,10 @@ export function siblingsOf(rows: PlanRow[], row: PlanRow): PlanRow[] {
   const parent = parentOf(row);
   return rows.filter((r) => r.depth === row.depth && parentOf(r) === parent);
 }
+
+/** How an external task is named in a plan using it: "Delivery (from Supplier)". */
+export function referenceName(reference: ResolvedReference): string {
+  return reference.ownerPlanName
+    ? `${reference.item.name} (from ${reference.ownerPlanName})`
+    : reference.item.name;
+}

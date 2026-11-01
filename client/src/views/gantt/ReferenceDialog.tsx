@@ -46,6 +46,17 @@ export function ReferenceDialog({ view, referenceId, onClose }: Props) {
   if (!ref || !task) return null;
 
   const editable = canEdit && agreement;
+  // Managers of either plan may make the link an agreement (the server checks it).
+  const canManage = view.myRoles.some((r) => r === "ADMIN" || r === "PLAN_OWNER");
+  const upgrade = () => {
+    if (
+      !window.confirm(
+        "Upgrade to AGREEMENT? Agreed values carry over. Afterwards, changes made here are proposed to the owner, and the owner's changes need this plan's approval when they are agreed.",
+      )
+    )
+      return;
+    void run(() => api.items.setReferenceType(ref.id, { type: "AGREEMENT" }));
+  };
   const changed =
     name !== task.name ||
     start !== task.start ||
@@ -96,7 +107,7 @@ export function ReferenceDialog({ view, referenceId, onClose }: Props) {
 
   return (
     <Dialog
-      title={`External task ${ref.taskNumber}`}
+      title={`External task ${ref.taskNumber} (from ${ref.ownerPlanName})`}
       onClose={onClose}
       footer={
         <>
@@ -140,6 +151,13 @@ export function ReferenceDialog({ view, referenceId, onClose }: Props) {
           : "MONITOR: this task follows its owner plan and cannot be changed here."}
         {pending && " A change is waiting for approval."}
       </p>
+      {!agreement && canManage && (
+        <p>
+          <button type="button" onClick={upgrade} disabled={busy}>
+            Upgrade to AGREEMENT
+          </button>
+        </p>
+      )}
       {proposal && (
         <p className="pp-hint pp-proposal-note">
           Proposed: {proposal.proposed.name},{" "}

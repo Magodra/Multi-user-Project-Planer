@@ -1,7 +1,7 @@
 import type { AuditLogEntry } from "@planning/shared";
 import type { StorageAdapter } from "../storage/StorageAdapter.js";
 import type { AccessService } from "./AccessService.js";
-import { type ServiceContext, newMeta } from "./support.js";
+import { type ServiceContext, newMeta, timeOrderedId } from "./support.js";
 
 export interface AuditRecord {
   projectId: string | null;
@@ -21,6 +21,8 @@ export class AuditService {
   async record(tx: StorageAdapter, ctx: ServiceContext, record: AuditRecord): Promise<void> {
     const entry: AuditLogEntry = {
       ...newMeta(ctx),
+      // Time-ordered: entries written in the same millisecond keep their order.
+      id: timeOrderedId(),
       projectId: record.projectId,
       entityType: record.entityType,
       entityId: record.entityId,
@@ -37,8 +39,7 @@ export class AuditService {
       "auditLog",
       entityId ? { projectId, entityId } : { projectId },
     );
-    return entries.sort((a, b) =>
-      a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0,
-    );
+    const key = (e: AuditLogEntry) => `${e.createdAt}|${e.id}`;
+    return entries.sort((a, b) => (key(a) < key(b) ? -1 : key(a) > key(b) ? 1 : 0));
   }
 }

@@ -7,20 +7,24 @@ import {
 import {
   type Baseline,
   type CreatePlanInput,
+  type Dependency,
   type Plan,
   type PlanView,
   type RecipientInfo,
   type ResolvedReference,
   type RoleAssignment,
+  getItemKind,
   getItemKinds,
 } from "@planning/shared";
 import { ConflictError } from "../domain/errors.js";
+import { assertPlanDeletable } from "../domain/plans.js";
 import { effectiveLinkType } from "../domain/links.js";
 import type { StorageAdapter } from "../storage/StorageAdapter.js";
 import type { AccessService } from "./AccessService.js";
 import type { AuditService } from "./AuditService.js";
 import type { EventBus } from "./events.js";
 import { findTrackBaseline, getDefinition } from "./lookups.js";
+import { childCount } from "./workflow.js";
 import { type ServiceContext, mustGet, newMeta, touch } from "./support.js";
 
 export class PlanService {
@@ -129,6 +133,97 @@ export class PlanService {
     return saved;
   }
 
+  /**
+   * Delete a plan for good, after the user confirmed it. Refused while its
+   * tasks are used in other plans, while change requests involving it are
+   * open, and when it has locked baselines (accepted history is never
+   * removed). Deletes everything that belongs only to the plan and drops it
+   * from timelines and report definitions.
+   */
+  async delete(ctx: ServiceContext, planId: string, version: number): Promise<void> {
+    const plan = await mustGet(this.storage, "plan", planId);
+    await this.access.require(ctx, plan.projectId, planId, "plan.manage");
+    const { projectId } = plan;
+    await this.storage.transaction(async (tx) => {
+      const current = await mustGet(tx, "plan", planId);
+      if (current.version !== version) throw new ConflictError("Plan was changed by someone else");
+      const tasks = await tx.query("task", { projectId, planId });
+      const taskIds = new Set(tasks.map((t) => t.id));
+      const usedBy = (
+        await Promise.all(tasks.map((t) => tx.query("planItemReference", { itemId: t.id })))
+      ).flat();
+      const usedInPlans = [
+        ...new Set(
+          await Promise.all(
+            usedBy.map(async (r) => (await tx.get("plan", r.planId))?.name ?? r.planId),
+          ),
+        ),
+      ];
+      const requests = await tx.query("changeRequest", { projectId, planId });
+      const pendingApprovals = await tx.query("approval", { planId, status: "PENDING" });
+      const baselines = await tx.query("baseline", { projectId, planId });
+      assertPlanDeletable({
+        usedInPlans,
+        openRequests:
+          requests.filter((cr) => cr.status === "PENDING").length + pendingApprovals.length,
+        lockedBaselines: baselines.filter((b) => b.locked).length,
+      });
+
+      // Dependencies on its tasks (any plan) and the plan's own ones.
+      const deps = new Map<string, Dependency>();
+      for (const id of taskIds) {
+        for (const d of await tx.query("dependency", { fromItemId: id })) deps.set(d.id, d);
+        for (const d of await tx.query("dependency", { toItemId: id })) deps.set(d.id, d);
+      }
+      for (const d of await tx.query("dependency", { projectId }))
+        if (d.planId === planId) deps.set(d.id, d);
+      for (const d of deps.values()) await tx.delete("dependency", d.id, d.version);
+
+      // Its uses of other plans' tasks, with their links.
+      for (const ref of await tx.query("planItemReference", { planId })) {
+        for (const link of await tx.query("planLink", { referenceId: ref.id }))
+          await tx.delete("planLink", link.id, link.version);
+        await tx.delete("planItemReference", ref.id, ref.version);
+      }
+      for (const cr of requests) {
+        for (const a of await tx.query("approval", { changeRequestId: cr.id }))
+          await tx.delete("approval", a.id, a.version);
+        await tx.delete("changeRequest", cr.id, cr.version);
+      }
+      for (const b of baselines) await tx.delete("baseline", b.id, b.version);
+      for (const t of tasks) await tx.delete("task", t.id, t.version);
+      for (const a of await tx.query("roleAssignment", { projectId, planId }))
+        await tx.delete("roleAssignment", a.id, a.version);
+      for (const t of await tx.query("timeline", { projectId })) {
+        const entries = t.entries.filter((e) => e.planId !== planId);
+        if (entries.length !== t.entries.length)
+          await tx.save("timeline", touch(t, ctx, { entries }));
+      }
+      for (const r of await tx.query("reportDefinition", { projectId })) {
+        if (r.planIds.includes(planId))
+          await tx.save(
+            "reportDefinition",
+            touch(r, ctx, { planIds: r.planIds.filter((id) => id !== planId) }),
+          );
+      }
+      await tx.delete("plan", planId, version);
+      await this.audit.record(tx, ctx, {
+        projectId,
+        entityType: "plan",
+        entityId: planId,
+        action: "delete",
+        details: { name: plan.name, tasks: tasks.length },
+      });
+    });
+    this.events.emit({
+      projectId,
+      entityType: "plan",
+      entityId: planId,
+      action: "delete",
+      planIds: [planId],
+    });
+  }
+
   /** Everything the client needs to render a plan, with external items resolved live. */
   async getView(ctx: ServiceContext, planId: string): Promise<PlanView> {
     const plan = await mustGet(this.storage, "plan", planId);
@@ -140,14 +235,19 @@ export class PlanService {
       this.storage.query("planLink", { projectId }),
     ]);
     const references: ResolvedReference[] = [];
+    const ownerNames = new Map<string, string>();
     for (const r of refs) {
       const item = await this.storage.get("task", r.itemId);
-      if (item)
-        references.push({
-          ...normalizeReference(r),
-          item,
-          linkType: effectiveLinkType(r, allLinks),
-        });
+      if (!item) continue;
+      if (!ownerNames.has(r.ownerPlanId))
+        ownerNames.set(r.ownerPlanId, (await this.storage.get("plan", r.ownerPlanId))?.name ?? "");
+      references.push({
+        ...normalizeReference(r),
+        item,
+        linkType: effectiveLinkType(r, allLinks),
+        ownerPlanName: ownerNames.get(r.ownerPlanId)!,
+        itemKind: getItemKind(item, await childCount(this.storage, item)),
+      });
     }
     // Plans using this plan's external tasks, in any project of the tree.
     const recipientRefs = (

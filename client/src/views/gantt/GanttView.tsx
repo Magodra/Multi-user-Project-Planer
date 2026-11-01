@@ -27,7 +27,7 @@ import {
   createGanttAdapter,
 } from "./GanttAdapter";
 import { ItemDialog } from "./ItemDialog";
-import { planRows, siblingsOf } from "./planRows";
+import { planRows, referenceName, siblingsOf } from "./planRows";
 import { ReferenceDialog } from "./ReferenceDialog";
 import { predecessorText } from "./predecessors";
 import {
@@ -87,10 +87,10 @@ function buildRows(view: PlanView, agreed: Baseline | null, canEdit: boolean): G
     }
     const r = row.reference;
     const t = r.item;
-    const kind = t.duration === 0 ? "milestone" : "task";
+    const kind = r.itemKind;
     return {
       id: t.id,
-      text: t.name,
+      text: referenceName(r),
       parent: r.parentId,
       start: toDisplayDate(t.start, t.granularity),
       end: toDisplayDate(t.end, t.granularity),
@@ -98,9 +98,11 @@ function buildRows(view: PlanView, agreed: Baseline | null, canEdit: boolean): G
       number: String(r.taskNumber),
       predecessors: predecessorText(view, t.id),
       durationLabel: kind === "milestone" ? "◆" : `${t.duration} ${t.granularity}`,
-      locked: !canEdit || r.linkType !== "AGREEMENT",
+      // An activity's dates follow its subtasks in the owner plan; it cannot be dragged here.
+      locked: !canEdit || r.linkType !== "AGREEMENT" || kind === "activity",
       classes: [
         "pp-reference",
+        `pp-kind-${kind}`,
         r.linkType === "AGREEMENT" ? "pp-agreement-ref" : "",
         r.agreementState === "REJECTED" ? "pp-rejected" : "",
         pending.has(t.id) ? "pp-pending" : "",
@@ -319,7 +321,7 @@ export function GanttView({ planId }: { planId: string }) {
   const deleteSelected = () => {
     if (!selectedRow) return;
     const name =
-      selectedRow.type === "task" ? selectedRow.task.name : selectedRow.reference.item.name;
+      selectedRow.type === "task" ? selectedRow.task.name : referenceName(selectedRow.reference);
     const question =
       selectedRow.type === "task"
         ? `Delete task '${name}'?`

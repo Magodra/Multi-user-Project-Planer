@@ -257,3 +257,31 @@ export async function saveTaskChange(
     details: { ...details },
   });
 }
+
+/**
+ * Plans (and their projects) whose views show a change to these tasks: the
+ * tasks' own plans and every plan using one of them or one of their
+ * activities, whose dates roll up from them.
+ */
+export async function taskChangeAudience(
+  storage: StorageAdapter,
+  tasks: Task[],
+): Promise<{ projectIds: string[]; planIds: string[] }> {
+  const projectIds = new Set<string>();
+  const planIds = new Set<string>();
+  const seen = new Set<string>();
+  for (const start of tasks) {
+    let task: Task | null = start;
+    while (task && !seen.has(task.id)) {
+      seen.add(task.id);
+      projectIds.add(task.projectId);
+      planIds.add(task.planId);
+      for (const r of await storage.query("planItemReference", { itemId: task.id })) {
+        projectIds.add(r.projectId);
+        planIds.add(r.planId);
+      }
+      task = task.parentId ? await storage.get("task", task.parentId) : null;
+    }
+  }
+  return { projectIds: [...projectIds], planIds: [...planIds] };
+}

@@ -147,6 +147,12 @@ export const api = {
     create: (projectId: string, input: CreatePlanInput) =>
       post<Plan>(`/api/projects/${enc(projectId)}/plans`, input),
     view: (planId: string) => get<PlanView>(`/api/plans/${enc(planId)}/view`),
+    update: (
+      planId: string,
+      input: { version: number; name?: string; planType?: string; description?: string },
+    ) => patch<Plan>(`/api/plans/${enc(planId)}`, input),
+    delete: (planId: string, version: number) =>
+      del(`/api/plans/${enc(planId)}?version=${version}`),
   },
   items: {
     get: (id: string) => get<Task>(`/api/items/${enc(id)}`),

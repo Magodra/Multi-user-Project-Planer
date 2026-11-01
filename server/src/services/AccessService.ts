@@ -38,6 +38,22 @@ export class AccessService {
     return roles;
   }
 
+  /**
+   * The link type of a reference binds both plans, so managers of either the
+   * owner plan or the receiving plan may set it.
+   */
+  async requireLinkManager(
+    ctx: ServiceContext,
+    owner: { projectId: string; id: string },
+    recipient: { projectId: string; id: string },
+  ): Promise<void> {
+    for (const plan of [owner, recipient])
+      if (await this.canDo(ctx, plan.projectId, plan.id, "plan.manage")) return;
+    throw new ForbiddenError(
+      "Only managers of the owner plan or the receiving plan can set the link type",
+    );
+  }
+
   async canDo(
     ctx: ServiceContext,
     projectId: string,

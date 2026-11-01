@@ -221,6 +221,10 @@ button:disabled {
   text-align: center;
   color: var(--pp-muted);
 }
+.pp-tree-edit {
+  margin-left: auto;
+  font-size: 0.85rem;
+}
 .pp-tree-plan::before {
   content: "";
   width: 0.55rem;
@@ -339,6 +343,15 @@ button:disabled {
   display: flex;
   flex-direction: column;
   height: 100%;
+  overflow: hidden;
+}
+/*
+ * The workspace never scrolls as a page: popups that libraries attach to <body>
+ * (e.g. Gantt tooltips) must not bring up a page scrollbar, whose width would
+ * shift the whole layout and make every panel re-layout again.
+ */
+body:has(.pp-workspace) {
+  overflow: hidden;
 }
 .pp-topbar {
   display: flex;
@@ -437,6 +450,12 @@ button:disabled {
 .pp-gantt-host .gantt_task_line.pp-reference {
   background: #98a2b3;
   border-color: #667085;
+}
+/* An external activity: drawn with its own dates, marked as a summary bar. */
+.pp-gantt-host .gantt_task_line.pp-reference.pp-kind-activity {
+  border-width: 0 0 4px;
+  border-style: solid;
+  border-radius: 2px 2px 0 0;
 }
 .pp-gantt-host .gantt_task_line.pp-rejected {
   box-shadow: 0 0 0 2px var(--pp-late);
