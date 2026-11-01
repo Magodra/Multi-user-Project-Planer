@@ -1,0 +1,17 @@
+// Development configuration used by `npm run dev` (via server/.env.development).
+// File backend in ./data, local accounts, Vite dev server allowed as origin.
+{
+  "backend": "file",
+  "file": { "path": "./data" },
+  "server": {
+    "port": 8080,
+    "allowedOrigins": ["http://localhost:5173"],
+    "allowFileClient": true,
+    "clientDir": "./client/dist"
+  },
+  "mcp": { "enabled": true, "path": "/mcp" },
+  "auth": {
+    "mode": "local",
+    "local": { "passwordMinLength": 8, "sessionTimeoutMinutes": 480 }
+  }
+}

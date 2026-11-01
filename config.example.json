@@ -1,0 +1,59 @@
+// Copy to config.json (or point PLANNING_CONFIG at your file). `//` comments are allowed.
+// Secrets are read from environment variables with the ${VAR} syntax — never commit them.
+// Relative paths are resolved against the directory of this file.
+{
+  "backend": "file", // "file" | "sql"
+  "file": {
+    "path": "./data"
+  },
+  "sql": {
+    "dialect": "postgres", // "postgres" | "sqlite" | "mssql"
+    // postgres: "postgres://user:${DB_PASSWORD}@host:5432/planning"
+    // sqlite:   "./data/planning.db"
+    // mssql:    "mssql://user:${DB_PASSWORD}@host:1433/planning?encrypt=true&trustServerCertificate=false"
+    "connectionString": "postgres://planning:${DB_PASSWORD}@localhost:5432/planning"
+  },
+  "server": {
+    "port": 8080,
+    "allowedOrigins": ["https://planning.example.com"],
+    "allowFileClient": false, // allow clients opened from file:// (Origin: null)
+    "clientDir": "./client/dist", // serve the built client (hosted mode); omit to disable
+    "trustProxy": false // true behind a reverse proxy (e.g. for HTTPS)
+  },
+  "mcp": {
+    "enabled": true,
+    "path": "/mcp", // Streamable HTTP endpoint on the same server
+    "oauth": {
+      // OAuth 2.1 for MCP clients such as the ChatGPT app
+      "enabled": false,
+      "issuerUrl": "https://planning.example.com", // public HTTPS URL of this server
+      "accessTokenMinutes": 60,
+      "refreshTokenDays": 30
+    }
+  },
+  "auth": {
+    "mode": "local", // "local" | "sso" | "ldap"
+    "local": {
+      "passwordMinLength": 12,
+      "sessionTimeoutMinutes": 480
+    }
+    // "sso": {
+    //   "protocol": "oidc",
+    //   "issuer": "https://login.example.com",
+    //   "clientId": "planning",
+    //   "clientSecret": "${SSO_CLIENT_SECRET}",
+    //   "redirectUri": "https://planning.example.com/auth/callback",
+    //   "groupClaim": "groups"
+    // },
+    // "ldap": {
+    //   "url": "ldaps://ldap.example.com:636",
+    //   "bindDn": "cn=svc-planning,ou=services,dc=example,dc=com",
+    //   "bindPassword": "${LDAP_BIND_PASSWORD}",
+    //   "userSearchBase": "ou=users,dc=example,dc=com",
+    //   "userFilter": "(uid={username})",
+    //   "groupSearchBase": "ou=groups,dc=example,dc=com",
+    //   "groupFilter": "(member={dn})"
+    // },
+    // "roleMapping": { "planning-admins": "ADMIN" }
+  }
+}

@@ -426,3 +426,14 @@ FodyWeavers.xsd
 
 # Official VS Code C# Dev Kit Extension exclusion
 #*.lscache
+
+# --- Multi-user Project Planning System ---
+dist/
+/data/
+/config.json
+.env
+.env.local
+/test-results/
+/playwright-report/
+/tests/e2e/.tmp/
+*.tsbuildinfo

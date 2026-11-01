@@ -27,8 +27,8 @@ The user interface is an HTML page with Gantt charts, timelines and a calendar v
 - **The server is written in Node.js with TypeScript** (strict mode). Shared types in `/shared` are TypeScript and used by both client and server.
 - **The client is written in React with TypeScript** (strict mode, function components and hooks). Third-party UI components that manage their own DOM (e.g. the Gantt) are wrapped in a React component that owns the instance and syncs it with React state.
 - **Client libraries**:
-  - **Dockview** — multi-panel workspace (dockable, resizable, tabbed panels). The panel layout is serialised and stored as a Workspace.
-  - **FullCalendar (MIT core only)** — calendar view. Do not use FullCalendar Premium plugins.
+  - **Dockview** — multi-panel workspace (dockable, resizable, tabbed panels). The panel layout is serialised and stored as a Workspace. Since v8 the React binding is the `dockview-react` package (`dockview` itself is framework-agnostic).
+  - **FullCalendar (MIT core only)** — calendar view, v6.1 with the standard `daygrid`, `timegrid` and `multimonth` plugins. Do not use FullCalendar Premium plugins.
   - **dnd-kit** — dragging tasks/milestones from plans into timelines, including between Dockview panels.
   - **DHTMLX Gantt Community Edition** — Gantt view (see §7).
 - A browser cannot safely write shared files for multiple users at once; a thin server is therefore used for the file backend as well.
@@ -41,7 +41,14 @@ The backend exposes a **Model Context Protocol (MCP) server** alongside the REST
 - Implemented with the official TypeScript SDK (`@modelcontextprotocol/sdk`) in `/server/mcp`, served over Streamable HTTP at `mcp.path` on the same Node server. Enabled/disabled in `config.json`.
 - **MCP is a thin layer over `/server/services`**, exactly like the REST API. No business logic, storage access or access-control decisions in `/server/mcp`.
 - **Every MCP call runs as an authenticated user** using the configured auth mode (local, SSO, LDAP), with the same roles and permissions as the UI. Calls are written to the AuditLog and marked as coming from MCP.
-- **Tools** (initial set): list projects and plans; get plan items, dependencies and links; create/update/move tasks; create and compare baselines; create ChangeRequests; list pending approvals; run a ReportDefinition.
+- **MCP OAuth** (`mcp.oauth`, off by default): the server is also an OAuth 2.1 authorization server for MCP clients such as the ChatGPT app. Implementation: `/server/auth/oauth`.
+  - **SDK router:** the MCP SDK's `mcpAuthRouter` serves discovery metadata (RFC 8414, RFC 9728), dynamic client registration (RFC 7591), `/authorize`, `/token` (PKCE S256) and `/revoke`. It is mounted before our CORS and origin checks.
+  - **Our provider:** `PlannerOAuthProvider` renders a standalone sign-in and consent page and signs the user in with the configured auth mode. Local and LDAP use a password form; SSO goes through the identity provider, which carries a context through the redirect.
+  - **Tokens:** access tokens are bound to the MCP endpoint (RFC 8707 `resource`), short-lived, and paired with refresh tokens that rotate on every use.
+  - **Storage:** codes and tokens are kept in memory, like UI sessions. Registered clients are stored (entity `oauthClient`).
+  - **401 responses** from `/mcp` carry `WWW-Authenticate` with the resource metadata URL, so clients can discover how to sign in.
+  - **Session tokens** from `/api/auth/login` keep working at `/mcp`, for API clients that send a fixed bearer token.
+- **Tools** (initial set): list projects and plans; get plan items, dependencies and links; create/update/move/reorder tasks; set predecessors; propose changes to external tasks on AGREEMENT references; create and compare baselines; create ChangeRequests; list pending approvals; run a ReportDefinition.
 - **Resources**: read-only views of projects, plans, baselines and report definitions, addressed by URI (e.g. `planning://project/{id}/plan/{id}`).
 - Tool inputs and outputs are typed with the shared types in `/shared` and validated with schemas (zod).
 - Changes made through MCP go through the same acceptance workflow as the UI: an agent can propose and create ChangeRequests, but locked baselines stay immutable.
@@ -89,11 +96,18 @@ Rules that make `file://` work:
   "server": {
     "port": 8080,
     "allowedOrigins": ["https://planning.example.com"],
-    "allowFileClient": false     // allow clients opened from file:// (Origin: null)
+    "allowFileClient": false,    // allow clients opened from file:// (Origin: null)
+    "trustProxy": false          // true behind a reverse proxy (e.g. for HTTPS)
   },
   "mcp": {
     "enabled": true,
-    "path": "/mcp"               // Streamable HTTP endpoint on the same server
+    "path": "/mcp",              // Streamable HTTP endpoint on the same server
+    "oauth": {
+      "enabled": false,          // OAuth 2.1 for MCP clients (e.g. the ChatGPT app)
+      "issuerUrl": "https://planning.example.com",  // public HTTPS URL of this server
+      "accessTokenMinutes": 60,
+      "refreshTokenDays": 30
+    }
   },
   "auth": {
     "mode": "local",             // "local" | "sso" | "ldap"
@@ -129,26 +143,37 @@ Rules that make `file://` work:
 - Authentication is selected with `auth.mode`; only the section for the selected mode is required. Each mode is implemented as an `AuthProvider` behind a common interface in `/server/auth`, so the rest of the server is independent of the mode.
 - For SSO and LDAP, users are created in the system on first login. `roleMapping` can assign roles from external groups; roles can also be managed in the system.
 
-## 3. Folder structure (target)
+## 3. Folder structure
 
 ```
-/client          React + TypeScript UI
-  /views         gantt/, timeline/, calendar/, reports/
-  /components    shared UI components
+/client
+  index.html, vite.config.ts, public/client-config.js
+  /src
+    /views         gantt/ (GanttAdapter = all DHTMLX code), timeline/, calendar/, reports/,
+                   approvals/ (inbox, baselines & change requests), project/ (plans, members, links)
+    /components    shared UI components and status badges
+    /workspace     Dockview workspace, panel registry, project data + live updates
+    /api           REST client (bearer token in memory) and WebSocket client
+    /auth, /pages  login (local/LDAP/SSO), projects list
+  /vendor-patches  (empty — library patches only if unavoidable)
 /server
-  /domain        entities and business rules (pure logic, no I/O)
-  /services      baseline, approval, linking, reporting
-  /api           REST endpoints
-  /mcp           MCP server (tools and resources over the same services)
-  /auth          AuthProvider interface + local, sso, ldap providers
-  /storage
-    StorageAdapter.ts
-    /file        FileAdapter
-    /sql         SqlAdapter + migrations
-/shared          types shared between client and server
-/tests
-config.example.json
+  /src
+    /domain        business rules (pure logic, no I/O) + errors
+    /services      one service per area; workflow.ts holds steps shared by items and approvals
+    /api           REST endpoints (Express 5)
+    /mcp           MCP server (tools and resources over the same services)
+    /auth          AuthProvider interface + local, OIDC (sso), LDAP providers; sessions
+    /realtime      WebSocket live updates
+    /storage       StorageAdapter.ts, contract.test.ts, /file FileAdapter, /sql SqlAdapter + migrations
+    /config        config.json loading and validation
+    /testing       test backends and fixtures (not shipped)
+  /scripts         migrate, migrate:make
+/shared/src        types, zod schemas, API shapes, /time, /domain (getItemKind)
+/tests/e2e         Playwright (hosted + file:// projects)
+config.example.json, config.dev.json
 ```
+
+Unit and integration tests live next to the code as `*.test.ts`.
 
 ## 4. Domain model
 
@@ -156,19 +181,19 @@ config.example.json
 
 | Entity | Description |
 |---|---|
-| **Project** | Top level. Has many plans, users and roles. A project may have subprojects. |
+| **Project** | Top level. Has many plans, users and roles. Has a name, a free-text project type, a description and an active flag. Projects form a hierarchy through `parentProjectId` (null = top level). |
 | **Plan** | User-defined type (contract, internal, reporting, …). Belongs to one project. May have an owning/responsible party. |
-| **Task** | The single item entity in a plan. Its kind (task, milestone, activity) is derived, not stored — see "Taks kinds" below. |
+| **Task** | The single item entity in a plan. Has a per-plan task ID (`taskNumber`) and a position among its siblings (`sortOrder`). Its kind (task, milestone, activity) is derived, not stored — see "Task kinds" below. |
 | **Ownership** | A Task is either **internal** (lives only in one plan) or **external** (owned by one plan, can be used in several). |
-| **TaskReference** | Use of an external item in another plan. Points to the owner item; holds no copy of its dates. |
+| **TaskReference** | Use of an external item in another plan. Points to the owner item; holds no copy of its name or dates. Has its own place in the recipient plan's hierarchy (`parentId`, `sortOrder`). |
 | **PlanLink** | Link between two plans (or between an item and a reference) of type **MONITOR** or **AGREEMENT**. |
-| **Dependency** | Dependency between items (FS, SS, FF, SF + lag), also across plans via references. |
+| **Dependency** | Dependency between items (FS, SS, FF, SF + lag in `lagUnit`; negative lag = lead). Belongs to one plan (`planId`) in which both tasks are shown: own tasks or external tasks used there, also from other projects of the tree. |
 | **Baseline** | Snapshot of a plan. Has a type, a parent (for branching) and settings. |
 | **BaselineDefinition** | Configuration of a baseline type (see §6). |
 | **ChangeRequest** | Proposed change/acceptance that requires approval. |
 | **Approval** | One party's approval/rejection of a ChangeRequest. |
 | **Timeline** | User-defined timeline that items are dragged into. |
-| **Workspace/View** | The user's layout of open panels (plans, timelines, calendars). |
+| **Workspace/View** | The user's layout of open panels (plans, timelines, calendars), per user and project, plus `viewState` (UI state outside the panel layout, e.g. which projects are expanded in the Project panel's structure tree). |
 | **ReportDefinition** | Saved report setup that can be run repeatedly. |
 | **User / Role / Party** | Users, roles per project/plan, and parties (organisations/teams) that approve. |
 | **AuditLog** | Immutable log of all changes and approvals. |
@@ -187,12 +212,31 @@ There is one item entity, the **Task**. Its kind follows from its data:
 - Setting a task's duration to zero makes it a milestone; adding a subtask makes it an activity. A milestone cannot have subtasks.
 - Activity dates are rolled up from subtasks and are not edited directly.
 
+### Project hierarchy
+
+- A project's parent can be changed, but never to itself or one of its own subprojects (`assertValidProjectParent`).
+- Creating a subproject, or moving a project under another one, requires `project.admin` on the child **and** on the new parent.
+- **Inactive** projects keep all their data and stay fully usable; the projects page hides them, together with all their subprojects (active or not), unless "Show inactive projects" is checked. Deactivating a project does not change its subprojects' own active flag.
+- Projects stored before these fields existed read as top-level, untyped and active (`normalizeProject`).
+
+### Task IDs, order and predecessors
+
+- **Task ID** (`taskNumber`): assigned per plan when a task is created (highest + 1). An external task used in a plan gets a **local** ID there (`PlanItemReference.taskNumber`) from the same sequence, so it can be used in predecessor notation. It never changes when tasks are moved and is never reused after a delete, so predecessor references stay valid. Tasks stored before IDs existed are numbered after the highest ID in creation order (`missingTaskNumbers`), in the plan view and persistently on the next task creation in that plan.
+- **Order**: tasks are moved one place up or down among their siblings (`ItemService.reorder`). Order is not part of the schedule: reordering does not supersede ChangeRequests or reset agreement states.
+- **Predecessor notation** (`/shared/domain/predecessors`): entries separated by `;` or `,`, each `<task ID>[FS|SS|FF|SF][±<lag><unit>]`, e.g. `4FS+3d; 2SS-1w; 7`. The type defaults to FS; units are `h`, `d`, `w`, `mo`, `y`; without a unit the lag is in the successor's granularity. A negative lag is a lead.
+- `ItemService.setPredecessors` replaces a task's predecessors **in one plan** (default: the task's own plan; for an external task, pass the plan using it) in one transaction. Only that plan's own dependencies are replaced; links of other plans (e.g. the owner's) are shown but kept.
+- A dependency **belongs to a plan** (`planId`): both tasks must be shown there, it is stored in that plan's project, and that plan's editors manage it. Links between a plan's own tasks and external tasks therefore work across projects of the tree. Plan views show every link between their shown tasks, also the owners' own. Removing an external task from a plan removes that plan's links to it. Dependencies stored before `planId` existed belong to the successor's plan (`normalizeDependency`).
+- Dependencies may not form a loop, and a task cannot be linked to its own activity or subtasks (`/server/domain/dependencies`). Both apply to links drawn in the Gantt as well.
+- Dependencies stored before `lagUnit` existed read with the successor's granularity (`normalizeDependency`).
+
 ### Internal vs. external items
 
 - **Internal**: visible and editable only within its own plan.
 - **External**: has one **owner plan** and one or more **recipient plans** via `TaskReference`.
   - Changes are always made in the owner plan.
   - Recipient plans always see the owner's current values (live), but can compare against their own agreed baseline.
+  - In the recipient plan a reference is placed among the local tasks: under a local task (`parentId`) or at the top level, ordered together with the tasks (`sortOrder` is shared). A local task with references under it is an activity and rolls up their dates; when the owner changes the task, recipient plans that placed it under an activity are rolled up too (`rollUpPlan`). A milestone cannot hold references.
+  - Name, start, duration and unit always come from the owner's task. On a **MONITOR** reference they cannot be changed in the recipient plan. On an **AGREEMENT** reference a local change (dialog or dragging the bar) creates a ChangeRequest of kind `PROPOSE_TASK_CHANGE` with one Approval for the owner plan (approvers of the Estimated definition). Approval applies the values to the owner's task; rejection changes nothing. A newer proposal from the same plan, or any change to the task by its owner, supersedes it.
 
 ### Link types (per PlanLink)
 
@@ -204,6 +248,23 @@ There is one item entity, the **Task**. Its kind follows from its data:
 The link type is set per link, not per plan. The same external item can be MONITOR towards one plan and AGREEMENT towards another.
 
 **Upgrading MONITOR → AGREEMENT** does not require a new approval round. The upgrade takes effect immediately, and the items' current agreed values carry over as the starting point of the agreement. Only changes made *after* the upgrade go through the AGREEMENT approval workflow. The upgrade is recorded in the AuditLog.
+
+Implementation notes:
+
+- An item-level link (`referenceId` set) wins over a plan-level link between the owner and recipient plan; with no link the type is MONITOR (`effectiveLinkType`).
+- "Carry over" on upgrade copies the owner plan's Agreed-track values into the recipient's Agreed track for referenced items that have no agreed value there yet.
+- Using an external item in another plan requires edit rights on the recipient plan and membership of the owner's project — not read access to the owner plan. Choosing AGREEMENT for a reference (or upgrading one) needs the owner plan's manage right, like any link.
+- **Across the project tree**: an external task can be used in plans of any project in the same tree (its parents and subprojects; `assertSameProjectTree`). `ItemService.referenceTargets` lists the plans a user may add it to.
+  - A TaskReference, and a link for that one task, are stored with the **recipient plan's project**. Plan-level links connect plans of one project.
+  - An Approval is stored with the **deciding plan's project**, so its members see it in their inbox and their roles are checked there. Look approvals up by `changeRequestId`, track baselines by `planId` (`findTrackBaseline`), and references to a task by `itemId` (`referencesOf`), never scoped to one project.
+  - Change events are emitted once per project involved (`perProject`), so every workspace showing an affected plan updates live.
+- **Reference type**: when a task is added to another plan, MONITOR or AGREEMENT can be chosen. The choice is stored as a link for that one task (`setReferenceLinkType`), which wins over a plan-level link. The choice defaults to the plan-level link's type (else MONITOR), and only a different choice is stored. A MONITOR reference can be upgraded to AGREEMENT from the owner's task dialog.
+
+### Tracks and agreement state (as implemented)
+
+- **Estimated** is the live plan: the `Task` rows themselves. **Current** and **Agreed** are one `Baseline` each per plan with `kind: "TRACK"`, created with the plan and changed only by accepted ChangeRequests. Named snapshots are `kind: "SNAPSHOT"`, what-if branches `kind: "BRANCH"`.
+- `agreementState` (`NONE | PROPOSED | AGREED | REJECTED`) is stored on the `Task` (owner side) and on each `PlanItemReference` (recipient side).
+- One `Approval` row is created per required plan (tagged with the plan's `ownerPartyId`) and per extra party on an AGREEMENT link. A user may decide it with one of its `roles` on that plan, or by representing its party.
 
 ## 5. Time granularity
 
@@ -253,6 +314,8 @@ Configures how a baseline type behaves:
 }
 ```
 
+Each project starts with three definitions (Estimated, Current, Agreed); see `defaultDefinitions()` in `ProjectService`. The Estimated definition governs promoting a branch to the live plan. `lockOnAccept` means: after each accepted ChangeRequest, a locked SNAPSHOT of the updated track is stored as a child of the track, giving an immutable history.
+
 ### Acceptance workflow
 
 1. **Estimated → Current**: per item or in batch. Requires approval according to the definition (typically the plan owner).
@@ -264,16 +327,20 @@ Configures how a baseline type behaves:
 4. Acceptance is **atomic**: either the whole ChangeRequest is accepted, or nothing is.
 5. A new change to an item with an open ChangeRequest marks the old one as `SUPERSEDED`.
 6. **Rejected approval on an external item that is already current in a recipient plan**: the item stays in Current in the recipient plan, but gets the agreement state `REJECTED`. It is not rolled back. The rejected state is shown in the UI and kept until a new ChangeRequest is approved or the item changes.
+7. **Proposed task changes** (`PROPOSE_TASK_CHANGE`, see §4): raised in a recipient plan, decided by the owner plan, applied to the owner's live task when approved.
 
 ## 7. User interface
 
 - **Workspace with any number of panels**: users can open any number of plans, timelines and calendars side by side. The layout is saved as a Workspace.
-- **Gantt**: hierarchy (WBS), dependency arrows, drag to move/resize, zoom from hours to years.
+- **Project structure** (Project panel): a tree starting at the current project; under each project its plans first, then its subprojects (inactive ones hidden with their subtrees). Subprojects expand on demand and the expanded set is saved in the workspace's `viewState`. A subproject's plans open in the current workspace (its Gantt panel is titled with the subproject's name); the workspace subscribes to live changes of all its subprojects. Timelines stay per project: tasks from other projects cannot be dropped into them.
+- **Gantt**: hierarchy (WBS) with task IDs and a Predecessors column, dependency arrows, drag to move/resize, move up/down among siblings, a today line, and a timeline scale (hours, days, weeks, months, quarters, years) with zoom −/+, Ctrl + wheel, Fit and Today. The scale logic is library-neutral in `views/gantt/scale.ts`.
 - **Baseline overlay**: select one or more baselines and show them as shadow/outline bars behind the active plan. Variances are colour-coded (earlier/later). Default: Agreed, Current, Estimated.
 - **Timelines**: user-configurable (name, time span, scale, rows/swimlanes). Tasks are **dragged in** from a plan; the timeline shows references, not copies.
+- **Using tasks in other plans**: tasks are dragged from a plan's Task List onto another plan's Gantt or Task List panel. This adds a MONITOR reference in that plan, also for plans of subprojects opened in the workspace. Dropping an internal task asks to make it external first. The task dialog's "Use in another plan" lists the plans using the task with their MON/AGR type, offers the upgrade to AGREEMENT, and adds the task to another plan of the project tree with a chosen type.
 - **Calendar view**: day/week/month/year; tasks shown as events, milestones as markers.
 - **Status indicators**: internal/external, MONITOR/AGREEMENT, pending approval, rejected, variance against agreed.
-- **Approval inbox**: list of ChangeRequests the user needs to act on.
+- **Proposed task changes** (`PROPOSE_TASK_CHANGE`) are drawn in the Gantt as a dashed outline at the proposed dates, in the proposing plan and the owner plan (`PlanView.proposedChanges`), until the owner decides.
+- **Approval inbox**: list of ChangeRequests the user needs to act on, in the workspace's project and its subprojects. The task dialogs (own and external tasks) also list the open requests covering that task (`ChangeRequestService.pendingForItem`), with Approve/Reject where the user may decide. Both use the same decision endpoint (UI only).
 - Live updates via WebSocket when other users change data.
 
 ### Gantt library: DHTMLX Gantt Community Edition (MIT)
@@ -283,9 +350,11 @@ Configures how a baseline type behaves:
 - Features **not** in the Community Edition that this system needs, and which we build ourselves:
   - **Baseline overlay** (multiple baselines per bar) — rendered as our own layer positioned with the Gantt's date-to-pixel API and kept in sync on scroll/zoom.
   - **Working-time calendars** — calculated in `/shared/time` and on the server, not by the Gantt.
-  - **Today line / markers**, **undo/redo**, **multi-select and horizontal drag** — implement in our own UI layer if needed.
+  - **Today line** — implemented in the overlay layer with `posFromDate()`; the chart's date range always includes today.
+  - **Markers**, **undo/redo**, **multi-select and horizontal drag** — implement in our own UI layer if needed.
 - Auto-scheduling, critical path and resources are out of scope for the Gantt component; any scheduling logic lives in `/server/services`.
 - Keep all DHTMLX-specific code behind an adapter in `/client/views/gantt` so the library can be replaced (or upgraded to PRO) without touching the rest of the client.
+- **Panel resizes**: Dockview resizes panels and moves them between groups without a window resize. DHTMLX's own size watcher (a hidden iframe) stops working once the panel is moved, so the adapter re-renders from a `ResizeObserver` on its container; the calendar view does the same with FullCalendar's `updateSize()`. Any other view that measures its container needs the same.
 - Do not modify the library source in place. If a patch is unavoidable, keep it in `/client/vendor-patches` with a note explaining why.
 
 ## 8. Reports
@@ -314,32 +383,43 @@ interface StorageAdapter {
 ```
 
 - All entities have `id` (UUID), `version` (integer), `createdAt/By`, `updatedAt/By`.
-- **Optimistic locking**: `save` fails with `ConflictError` if `version` does not match.
+- **Optimistic locking**: `save` fails with `ConflictError` if `version` does not match. `version: 0` means create; the stored version is then 1.
+- `query` accepts equality filters only on the fields listed in `QUERYABLE_FIELDS` (both adapters enforce the same list). Results are ordered by id.
+- Inside `transaction(fn)`, use only the `tx` adapter passed to `fn`. SQLite has a single connection, so calling the outer adapter inside a transaction deadlocks.
+- The audit log is append-only at the storage level: updating or deleting entries fails.
 
 ### FileAdapter
 
 ```
 data/
+  .lock                             (held while a transaction commits)
+  users/<userId>.json, parties/<partyId>.json, oauth-clients/<clientId>.json
+  audit/<yyyy-mm>.jsonl             (entries without a project)
   projects/<projectId>/
     project.json
     plans/<planId>.json
     items/<itemId>.json
-    baselines/<baselineId>.json     (locked snapshot, never modified)
-    links.json
-    changeRequests/<id>.json
+    references/<referenceId>.json
+    baselines/<baselineId>.json     (tracks, snapshots, branches; locked ones are never modified)
+    baselineDefinitions/<id>.json
+    links.json, dependencies.json, roles.json
+    changeRequests/<id>.json, approvals/<id>.json
     timelines/, reports/, workspaces/
     audit/<yyyy-mm>.jsonl           (append-only)
 ```
 
-- Write atomically: write to a temp file and rename.
-- Project-level file lock for transactions.
+- Write atomically: every write goes through a transaction that buffers changes, writes all temp files, then renames them into place.
+- One lock for the whole data directory (an in-process mutex plus an exclusive `.lock` file for other processes), instead of one lock per project: a transaction does not know in advance which projects it will touch.
 - Suitable for small teams / simple installations.
 
 ### SqlAdapter
 
 - Migrations versioned in `/server/storage/sql/migrations`. Never modify a migration that has been run.
-- Core tables: `project, plan, plan_item, plan_item_reference, plan_link, dependency, baseline, baseline_item, baseline_definition, change_request, approval, timeline, timeline_entry, workspace, report_definition, app_user, party, role_assignment, audit_log`.
+- Core tables: `project, plan, plan_item, plan_item_reference, plan_link, dependency, baseline, baseline_item, baseline_definition, change_request, approval, timeline, timeline_entry, workspace, report_definition, app_user, party, oauth_client, role_assignment, audit_log`.
 - `baseline_item` stores a snapshot of dates/duration per item per baseline.
+- Table layout (`storage/sql/tables.ts`): every entity table has `id`, `version`, `created_at`, `updated_at`, a `data` column holding the entity as JSON, and real indexed columns for each queryable field. `baseline_item` and `timeline_entry` are fully relational child tables. Adding a field that is not queryable (e.g. the project's `parentProjectId`, `projectType`, `active`) needs no migration: it lives in `data`.
+- Migrations are registered statically in `migrations/index.ts` (no file scanning) and import from `kysely/migration`. The server runs pending migrations at startup; `npm run migrate` does the same on demand.
+- SQL Server connection strings use the URL form `mssql://user:pass@host:1433/db?encrypt=true&trustServerCertificate=false`.
 - Use parameterised queries; no string concatenation of SQL.
 
 ## 10. Access control and multi-user
@@ -376,8 +456,12 @@ data/
 | Lint/format | ESLint (typescript-eslint, react-hooks) + Prettier |
 | Type check | `tsc --noEmit` across all packages (Vite and tsx do not type-check) |
 
-- The `StorageAdapter` contract test suite is parameterised and runs against every backend: file, SQLite, PostgreSQL, SQL Server.
+- The `StorageAdapter` contract test suite is parameterised and runs against every backend: file, SQLite, PostgreSQL, SQL Server. Service and MCP tests run against file and SQLite (`server/src/testing/backends.ts`).
 - Testcontainers requires Docker. Backend tests that need Docker can be skipped locally with `SKIP_CONTAINER_TESTS=1`, but always run in CI.
+- TypeScript is pinned to 6.0: TypeScript 7 (native) is not yet supported by typescript-eslint.
+- `@planning/shared` is consumed from source during development through the `source` export condition (tsx `--conditions=source`, Vite/Vitest `resolve.conditions`, `customConditions` in tsconfig). The server production build uses `shared/dist`, so `npm run build` builds shared first.
+- `npm run dev` uses `config.dev.json` (file backend in `./data`, local auth) via `server/.env.development`.
+- The config file may contain `//` comments.
 
 ### Commands
 
@@ -398,4 +482,9 @@ Before considering a change done: `npm run typecheck`, `npm run lint` and `npm t
 
 ## 13. Open decisions
 
-- None at present. Add new open questions here as they arise.
+- **SAML** is not implemented: `auth.sso.protocol: "saml"` fails at startup with a clear message. OIDC is implemented. Adding SAML needs a library (e.g. `@node-saml/node-saml`) and a test IdP.
+- **Sessions** are kept in server memory: a restart signs everyone out, and the server must run as a single process (also assumed by the in-process event bus for live updates). Multi-instance deployments need a shared session store and event bus.
+- **MCP authentication**: OAuth 2.1 (`mcp.oauth`) or the UI's bearer session tokens. OAuth codes and tokens are kept in memory, so after a restart a connected client signs in again; its registration is stored and still valid. Long-lived agent tokens, Client ID Metadata Documents (only dynamic client registration is offered) and rate limiting of the password sign-in (also missing on `/api/auth/login`) are not implemented.
+- **Working calendars** are evaluated in UTC (working hours and dates). Per-project time zones are not supported yet.
+- **PDF export** is a dependency-free, text-only renderer. A richer layout (e.g. Gantt images) needs a decision on a rendering library.
+- **Scheduling across dependencies**: dependencies are stored and drawn, but successors are not moved automatically (by design: auto-scheduling is out of scope for the Gantt; any future scheduling belongs in `/server/services`).
