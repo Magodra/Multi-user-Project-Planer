@@ -107,26 +107,15 @@ export const moveTaskInput = z.object({
 export const addReferenceInput = z.object({
   itemId: id,
   planId: id,
-  /** Link type for this one task; omitted: a plan-level link (or MONITOR) applies. */
+  /** Link type for this reference; omitted: MONITOR. */
   linkType: linkTypeSchema.optional(),
 });
 
-/** Set the link type of one reference (an item-level link, which wins over plan-level ones). */
+/** Set the link type (MONITOR or AGREEMENT) of one reference. */
 export const setReferenceTypeInput = z.object({
   type: linkTypeSchema,
-});
-
-export const createLinkInput = z.object({
-  type: linkTypeSchema,
-  fromPlanId: id,
-  toPlanId: id,
-  referenceId: id.nullable().default(null),
-  partyIds: z.array(id).default([]),
-});
-
-export const changeLinkTypeInput = z.object({
-  version: z.number().int(),
-  type: linkTypeSchema,
+  /** Additional parties that must approve on an AGREEMENT link; omitted: unchanged. */
+  partyIds: z.array(id).optional(),
 });
 
 export const createDependencyInput = z.object({
@@ -285,8 +274,6 @@ export type CreateTaskInput = z.infer<typeof createTaskInput>;
 export type UpdateTaskInput = z.infer<typeof updateTaskInput>;
 export type MoveTaskInput = z.infer<typeof moveTaskInput>;
 export type AddReferenceInput = z.infer<typeof addReferenceInput>;
-export type CreateLinkInput = z.infer<typeof createLinkInput>;
-export type ChangeLinkTypeInput = z.infer<typeof changeLinkTypeInput>;
 export type SetReferenceTypeInput = z.infer<typeof setReferenceTypeInput>;
 export type CreateDependencyInput = z.infer<typeof createDependencyInput>;
 export type SetPredecessorsInput = z.infer<typeof setPredecessorsInput>;

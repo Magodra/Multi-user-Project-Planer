@@ -4,12 +4,10 @@ import { z } from "zod";
 import {
   addReferenceInput,
   assignRoleInput,
-  changeLinkTypeInput,
   compareBaselinesInput,
   createBaselineInput,
   createChangeRequestInput,
   createDependencyInput,
-  createLinkInput,
   createPartyInput,
   createPlanInput,
   createProjectInput,
@@ -287,26 +285,6 @@ export function apiRoutes(s: Services): Router {
   });
 
   // Links
-  r.get(
-    "/projects/:id/links",
-    async (req, res) => void res.json(await s.links.list(ctxOf(req), p(req, "id"))),
-  );
-  r.post(
-    "/links",
-    async (req, res) =>
-      void res.status(201).json(await s.links.create(ctxOf(req), createLinkInput.parse(req.body))),
-  );
-  r.patch(
-    "/links/:id",
-    async (req, res) =>
-      void res.json(
-        await s.links.changeType(ctxOf(req), p(req, "id"), changeLinkTypeInput.parse(req.body)),
-      ),
-  );
-  r.delete("/links/:id", async (req, res) => {
-    await s.links.delete(ctxOf(req), p(req, "id"));
-    res.status(204).end();
-  });
 
   // Baselines
   r.get(

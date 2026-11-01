@@ -1,30 +1,20 @@
 /** Link type rules (CLAUDE.md §4 "Link types"). Pure logic, no I/O. */
-import type { BaselineItem, LinkType, PlanItemReference, PlanLink } from "@planning/shared";
-import { RuleViolationError } from "./errors.js";
+import type {
+  BaselineItem,
+  LinkType,
+  PlanItemReference,
+  PlanLink,
+  Versioned,
+} from "@planning/shared";
 
-/**
- * The link type governing a reference: an item-level link wins over a
- * plan-level link between the owner and recipient plan. Default: MONITOR.
- */
+/** The link type of a reference: from its link, MONITOR without one. */
 export function effectiveLinkType(reference: PlanItemReference, links: PlanLink[]): LinkType {
   return governingLink(reference, links)?.type ?? "MONITOR";
 }
 
+/** The link of a reference, if any. */
 export function governingLink(reference: PlanItemReference, links: PlanLink[]): PlanLink | null {
-  const itemLink = links.find((l) => l.referenceId === reference.id);
-  if (itemLink) return itemLink;
-  return (
-    links.find(
-      (l) =>
-        l.referenceId === null &&
-        l.fromPlanId === reference.ownerPlanId &&
-        l.toPlanId === reference.planId,
-    ) ?? null
-  );
-}
-
-export function assertValidLink(fromPlanId: string, toPlanId: string): void {
-  if (fromPlanId === toPlanId) throw new RuleViolationError("A plan cannot be linked to itself");
+  return links.find((l) => l.referenceId === reference.id) ?? null;
 }
 
 /**
@@ -49,11 +39,36 @@ export function carryOverAgreedValues(
   return additions;
 }
 
-/** References covered by a link (one reference, or all between the two plans). */
+/** The reference a link applies to. */
 export function referencesUnderLink(
   link: PlanLink,
   references: PlanItemReference[],
 ): PlanItemReference[] {
-  if (link.referenceId !== null) return references.filter((r) => r.id === link.referenceId);
-  return references.filter((r) => r.ownerPlanId === link.fromPlanId && r.planId === link.toPlanId);
+  return references.filter((r) => r.id === link.referenceId);
+}
+
+/**
+ * Plan-level links (one link for every reference between two plans) were
+ * replaced by links per reference. Returns the per-reference links to create
+ * for a plan-level link: one for each reference between its plans that has no
+ * link of its own.
+ */
+export function splitPlanLevelLink(
+  link: Omit<PlanLink, "referenceId"> & { referenceId: string | null },
+  references: PlanItemReference[],
+  existing: PlanLink[],
+): Omit<PlanLink, keyof Versioned>[] {
+  const linked = new Set(existing.map((l) => l.referenceId));
+  return references
+    .filter(
+      (r) => r.ownerPlanId === link.fromPlanId && r.planId === link.toPlanId && !linked.has(r.id),
+    )
+    .map((r) => ({
+      projectId: r.projectId,
+      type: link.type,
+      fromPlanId: link.fromPlanId,
+      toPlanId: link.toPlanId,
+      referenceId: r.id,
+      partyIds: link.partyIds,
+    }));
 }

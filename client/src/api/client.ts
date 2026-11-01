@@ -12,14 +12,12 @@ import type {
   BaselineComparison,
   BaselineDefinition,
   BaselineTreeNode,
-  ChangeLinkTypeInput,
   ChangeRequest,
   ChangeRequestWithApprovals,
   CompareBaselinesInput,
   CreateBaselineInput,
   CreateChangeRequestInput,
   CreateDependencyInput,
-  CreateLinkInput,
   CreatePlanInput,
   CreateProjectInput,
   CreateTaskInput,
@@ -143,7 +141,6 @@ export const api = {
     removeRole: (id: string, assignmentId: string) =>
       del(`/api/projects/${enc(id)}/members/${enc(assignmentId)}`),
     definitions: (id: string) => get<BaselineDefinition[]>(`/api/projects/${enc(id)}/definitions`),
-    links: (id: string) => get<PlanLink[]>(`/api/projects/${enc(id)}/links`),
   },
   plans: {
     list: (projectId: string) => get<Plan[]>(`/api/projects/${enc(projectId)}/plans`),
@@ -177,12 +174,6 @@ export const api = {
     createDependency: (input: CreateDependencyInput) =>
       post<Dependency>("/api/dependencies", input),
     deleteDependency: (id: string) => del(`/api/dependencies/${enc(id)}`),
-  },
-  links: {
-    create: (input: CreateLinkInput) => post<PlanLink>("/api/links", input),
-    changeType: (id: string, input: ChangeLinkTypeInput) =>
-      patch<PlanLink>(`/api/links/${enc(id)}`, input),
-    delete: (id: string) => del(`/api/links/${enc(id)}`),
   },
   baselines: {
     list: (planId: string) => get<Baseline[]>(`/api/plans/${enc(planId)}/baselines`),

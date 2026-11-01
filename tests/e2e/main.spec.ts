@@ -355,10 +355,6 @@ test("place an external task among local tasks and propose a change under AGREEM
     await page.getByRole("button", { name: "Add plan" }).click();
     await expect(page.getByRole("button", { name: plan })).toBeVisible();
   }
-  await page.getByLabel("Owner plan").selectOption({ label: "Supplier" });
-  await page.getByLabel("Recipient plan").selectOption({ label: "Customer" });
-  await page.getByLabel("Link type").selectOption("AGREEMENT");
-  await page.getByRole("button", { name: "Link plans" }).click();
 
   // Supplier owns an external task and shares it with Customer.
   await page.getByRole("button", { name: "Supplier" }).click();
@@ -369,8 +365,7 @@ test("place an external task among local tasks and propose a change under AGREEM
   const row = (name: string) => page.locator(".gantt_row:visible", { hasText: name });
   await row("Shared delivery").dblclick();
   await page.getByLabel("Plan to use the task in").selectOption({ label: "Customer" });
-  // The plan-level AGREEMENT link sets the default type.
-  await expect(page.getByLabel("Reference type")).toHaveValue("AGREEMENT");
+  await page.getByLabel("Reference type").selectOption("AGREEMENT");
   await page.getByRole("button", { name: "Add reference" }).click();
   await expect(page.locator(".pp-used-in li", { hasText: "Customer" })).toContainText("AGR");
   await page.getByRole("dialog").getByRole("button", { name: "Cancel" }).click();
@@ -474,7 +469,7 @@ test("use tasks in subproject plans, choose the reference type and upgrade it", 
   await expect(subEntry).toContainText("MON");
   await subEntry.getByRole("button", { name: "Upgrade to AGREEMENT" }).click();
   await expect(subEntry).toContainText("AGR");
-  await expect(subEntry.getByRole("button")).toHaveCount(0);
+  await expect(subEntry.getByRole("button", { name: "Downgrade to MONITOR" })).toBeVisible();
 
   // Add it to another plan as AGREEMENT; plans of the subproject are offered too.
   const picker = page.getByLabel("Plan to use the task in");

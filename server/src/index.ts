@@ -14,6 +14,9 @@ async function main(): Promise<void> {
     passwordMinLength: config.auth.local.passwordMinLength,
     roleMapping: config.auth.roleMapping,
   });
+  // One-off: plan-level links become links per reference (idempotent).
+  const converted = await services.links.convertPlanLevelLinks();
+  if (converted > 0) console.log(`Converted ${converted} plan-level link(s) to links per task`);
   const provider = createAuthProvider(config.auth, services.users);
   const sessions = new SessionStore(config.auth.local.sessionTimeoutMinutes);
   const app = createApp({ services, provider, sessions, config });

@@ -150,7 +150,7 @@ Rules that make `file://` work:
   index.html, vite.config.ts, public/client-config.js
   /src
     /views         gantt/ (GanttAdapter = all DHTMLX code), timeline/, calendar/, reports/,
-                   approvals/ (inbox, baselines & change requests), project/ (plans, members, links)
+                   approvals/ (inbox, baselines & change requests), project/ (plans and subprojects, members)
     /components    shared UI components and status badges
     /workspace     Dockview workspace, panel registry, project data + live updates
     /api           REST client (bearer token in memory) and WebSocket client
@@ -186,7 +186,7 @@ Unit and integration tests live next to the code as `*.test.ts`.
 | **Task** | The single item entity in a plan. Has a per-plan task ID (`taskNumber`) and a position among its siblings (`sortOrder`). Its kind (task, milestone, activity) is derived, not stored — see "Task kinds" below. |
 | **Ownership** | A Task is either **internal** (lives only in one plan) or **external** (owned by one plan, can be used in several). |
 | **TaskReference** | Use of an external item in another plan. Points to the owner item; holds no copy of its name or dates. Has its own place in the recipient plan's hierarchy (`parentId`, `sortOrder`). |
-| **PlanLink** | Link between two plans (or between an item and a reference) of type **MONITOR** or **AGREEMENT**. |
+| **PlanLink** | The link type of one reference (an external task used in another plan): **MONITOR** or **AGREEMENT**, plus optional extra approving parties. A reference without a link is MONITOR. |
 | **Dependency** | Dependency between items (FS, SS, FF, SF + lag in `lagUnit`; negative lag = lead). Belongs to one plan (`planId`) in which both tasks are shown: own tasks or external tasks used there, also from other projects of the tree. |
 | **Baseline** | Snapshot of a plan. Has a type, a parent (for branching) and settings. |
 | **BaselineDefinition** | Configuration of a baseline type (see §6). |
@@ -245,20 +245,20 @@ There is one item entity, the **Task**. Its kind follows from its data:
 | **MONITOR** | Recipient sees changes and receives notifications/variance markers. No approval required. |
 | **AGREEMENT** | Changes affecting agreed values require approval from **all** parties to the link before they become *agreed*. Until then the change is shown as *proposed*. |
 
-The link type is set per link, not per plan. The same external item can be MONITOR towards one plan and AGREEMENT towards another.
+The link type is set per reference (each use of an external task in another plan), not per plan. The same external task can be MONITOR towards one plan and AGREEMENT towards another, and two tasks shared between the same plans can have different types.
 
 **Upgrading MONITOR → AGREEMENT** does not require a new approval round. The upgrade takes effect immediately, and the items' current agreed values carry over as the starting point of the agreement. Only changes made *after* the upgrade go through the AGREEMENT approval workflow. The upgrade is recorded in the AuditLog.
 
 Implementation notes:
 
-- An item-level link (`referenceId` set) wins over a plan-level link between the owner and recipient plan; with no link the type is MONITOR (`effectiveLinkType`).
+- A reference's type comes from its own link; with no link it is MONITOR (`effectiveLinkType`). Plan-level links (one type for every reference between two plans) were removed: stored ones are converted once at startup into links per reference (`LinkService.convertPlanLevelLinks`), so no reference changes type.
 - "Carry over" on upgrade copies the owner plan's Agreed-track values into the recipient's Agreed track for referenced items that have no agreed value there yet.
 - Using an external item in another plan requires edit rights on the recipient plan and membership of the owner's project — not read access to the owner plan. Choosing AGREEMENT for a reference (or upgrading one) needs the owner plan's manage right, like any link.
 - **Across the project tree**: an external task can be used in plans of any project in the same tree (its parents and subprojects; `assertSameProjectTree`). `ItemService.referenceTargets` lists the plans a user may add it to.
-  - A TaskReference, and a link for that one task, are stored with the **recipient plan's project**. Plan-level links connect plans of one project.
+  - A TaskReference, and a link for that one task, are stored with the **recipient plan's project**.
   - An Approval is stored with the **deciding plan's project**, so its members see it in their inbox and their roles are checked there. Look approvals up by `changeRequestId`, track baselines by `planId` (`findTrackBaseline`), and references to a task by `itemId` (`referencesOf`), never scoped to one project.
   - Change events are emitted once per project involved (`perProject`), so every workspace showing an affected plan updates live.
-- **Reference type**: when a task is added to another plan, MONITOR or AGREEMENT can be chosen. The choice is stored as a link for that one task (`setReferenceLinkType`), which wins over a plan-level link. The choice defaults to the plan-level link's type (else MONITOR), and only a different choice is stored. A MONITOR reference can be upgraded to AGREEMENT from the owner's task dialog.
+- **Reference type**: when a task is added to another plan, MONITOR or AGREEMENT can be chosen. The choice is stored as the reference's link (`setReferenceLinkType`); the default is MONITOR. In the owner's task dialog a MONITOR reference can be upgraded to AGREEMENT and an AGREEMENT reference downgraded to MONITOR. Extra approving parties can be set through the API (`partyIds`).
 
 ### Tracks and agreement state (as implemented)
 

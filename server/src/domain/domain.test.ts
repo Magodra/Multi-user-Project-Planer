@@ -36,7 +36,7 @@ import {
   reorderSiblings,
 } from "./dependencies.js";
 import { assertValidProjectParent, normalizeProject } from "./projects.js";
-import { carryOverAgreedValues, effectiveLinkType } from "./links.js";
+import { carryOverAgreedValues, effectiveLinkType, splitPlanLevelLink } from "./links.js";
 import { can, effectiveRoles } from "./permissions.js";
 
 const NOW = "2026-01-05T00:00:00.000Z";
@@ -99,7 +99,7 @@ const link = (
   type,
   fromPlanId,
   toPlanId,
-  referenceId: null,
+  referenceId: "r1",
   partyIds: [],
   ...extra,
 });
@@ -220,16 +220,32 @@ describe("change request status", () => {
 });
 
 describe("links", () => {
-  it("prefers item-level links over plan-level links", () => {
+  it("takes a reference's type from its own link, MONITOR without one", () => {
     const r = ref("r1", "t1", "B");
     expect(effectiveLinkType(r, [])).toBe("MONITOR");
     expect(effectiveLinkType(r, [link("AGREEMENT", "A", "B")])).toBe("AGREEMENT");
-    expect(
-      effectiveLinkType(r, [
-        link("AGREEMENT", "A", "B"),
-        link("MONITOR", "A", "B", { id: "x", referenceId: "r1" }),
-      ]),
-    ).toBe("MONITOR");
+    // Another reference's link between the same plans does not apply.
+    expect(effectiveLinkType(r, [link("AGREEMENT", "A", "B", { referenceId: "r2" })])).toBe(
+      "MONITOR",
+    );
+  });
+
+  it("splits a stored plan-level link into links for the references without one", () => {
+    const planLevel = { ...link("AGREEMENT", "A", "B", { partyIds: ["p1"] }), referenceId: null };
+    const references = [ref("r1", "t1", "B"), ref("r2", "t2", "B"), ref("r3", "t3", "C")];
+    const created = splitPlanLevelLink(planLevel, references, [
+      link("MONITOR", "A", "B", { referenceId: "r2" }),
+    ]);
+    expect(created).toEqual([
+      {
+        projectId: "pr",
+        type: "AGREEMENT",
+        fromPlanId: "A",
+        toPlanId: "B",
+        referenceId: "r1",
+        partyIds: ["p1"],
+      },
+    ]);
   });
 
   it("carries over agreed values on upgrade without overwriting", () => {

@@ -567,12 +567,9 @@ describe.each(serviceBackends)("services on $name", (backend) => {
       });
       await f.services.users.setUserParties(f.admin, f.carol.user.id, [party.id]);
       const carol = { ...f.carol, user: (await storage.get("user", f.carol.user.id))! };
-      const { item } = await sharedItem();
-      await f.services.links.create(f.admin, {
+      const { item, ref } = await sharedItem();
+      await f.services.links.setReferenceType(f.admin, ref.id, {
         type: "AGREEMENT",
-        fromPlanId: f.planA.id,
-        toPlanId: f.planB.id,
-        referenceId: null,
         partyIds: [party.id],
       });
       const { approvals } = await f.services.changeRequests.create(f.alice, {
@@ -681,13 +678,7 @@ describe.each(serviceBackends)("services on $name", (backend) => {
 
     it("sends a local change on an AGREEMENT reference to the owner for approval", async () => {
       const { external, phase, ref } = await placedReference();
-      await f.services.links.create(f.admin, {
-        type: "AGREEMENT",
-        fromPlanId: f.planA.id,
-        toPlanId: f.planB.id,
-        referenceId: null,
-        partyIds: [],
-      });
+      await f.services.links.setReferenceType(f.admin, ref.id, { type: "AGREEMENT" });
       const { changeRequest, approvals } = await f.services.changeRequests.proposeTaskChange(
         f.bob,
         ref.id,
@@ -740,13 +731,7 @@ describe.each(serviceBackends)("services on $name", (backend) => {
 
     it("leaves the task unchanged when the owner rejects or changes it first", async () => {
       const { external, ref } = await placedReference();
-      await f.services.links.create(f.admin, {
-        type: "AGREEMENT",
-        fromPlanId: f.planA.id,
-        toPlanId: f.planB.id,
-        referenceId: null,
-        partyIds: [],
-      });
+      await f.services.links.setReferenceType(f.admin, ref.id, { type: "AGREEMENT" });
       const first = await f.services.changeRequests.proposeTaskChange(f.bob, ref.id, {
         duration: 8,
         description: "",
@@ -926,21 +911,6 @@ describe.each(serviceBackends)("services on $name", (backend) => {
       const sub = await subproject();
       const monitored = await f.task("Monitored", { ownership: "EXTERNAL" });
       const agreed = await f.task("Agreed", { ownership: "EXTERNAL" });
-      // A plan-level link sets the default type offered for a plan.
-      await f.services.links.create(f.admin, {
-        type: "AGREEMENT",
-        fromPlanId: f.planA.id,
-        toPlanId: f.planB.id,
-        referenceId: null,
-        partyIds: [],
-      });
-      const defaults = Object.fromEntries(
-        (await f.services.items.referenceTargets(f.admin, monitored.id)).map((t) => [
-          t.planId,
-          t.defaultLinkType,
-        ]),
-      );
-      expect(defaults).toEqual({ [f.planB.id]: "AGREEMENT", [sub.plan.id]: "MONITOR" });
       const ref = await f.services.items.addReference(f.admin, {
         itemId: monitored.id,
         planId: sub.plan.id,
@@ -965,6 +935,9 @@ describe.each(serviceBackends)("services on $name", (backend) => {
       ).rejects.toBeInstanceOf(ForbiddenError);
       await f.services.links.setReferenceType(f.alice, ref.id, { type: "AGREEMENT" });
       expect(await types()).toEqual({ Monitored: "AGREEMENT", Agreed: "AGREEMENT" });
+      // And back: a downgrade to MONITOR.
+      await f.services.links.setReferenceType(f.alice, ref.id, { type: "MONITOR" });
+      expect(await types()).toEqual({ Monitored: "MONITOR", Agreed: "AGREEMENT" });
     });
 
     it("asks the subproject plan to approve agreements, in its own project", async () => {
@@ -1001,6 +974,48 @@ describe.each(serviceBackends)("services on $name", (backend) => {
   });
 
   describe("links", () => {
+    it("converts stored plan-level links into links per reference, once", async () => {
+      const shared = await f.task("Shared", { ownership: "EXTERNAL" });
+      const own = await f.task("Own link", { ownership: "EXTERNAL" });
+      const r1 = await f.services.items.addReference(f.bob, {
+        itemId: shared.id,
+        planId: f.planB.id,
+      });
+      await f.services.items.addReference(f.admin, {
+        itemId: own.id,
+        planId: f.planB.id,
+        linkType: "MONITOR",
+      });
+      // A plan-level link as stored by earlier versions.
+      const now = new Date().toISOString();
+      await storage.save("planLink", {
+        id: "legacy-link",
+        version: 0,
+        createdAt: now,
+        createdBy: "u",
+        updatedAt: now,
+        updatedBy: "u",
+        projectId: f.project.id,
+        type: "AGREEMENT",
+        fromPlanId: f.planA.id,
+        toPlanId: f.planB.id,
+        referenceId: null as unknown as string,
+        partyIds: [],
+      });
+      expect(await f.services.links.convertPlanLevelLinks()).toBe(1);
+      expect(await f.services.links.convertPlanLevelLinks()).toBe(0);
+      const types = Object.fromEntries(
+        (await f.services.plans.getView(f.bob, f.planB.id)).references.map((r) => [
+          r.item.name,
+          r.linkType,
+        ]),
+      );
+      // The reference without its own link keeps AGREEMENT; one with its own link is unchanged.
+      expect(types).toEqual({ Shared: "AGREEMENT", "Own link": "MONITOR" });
+      expect(await storage.get("planLink", "legacy-link")).toBeNull();
+      expect(r1.id).toBeTruthy();
+    });
+
     it("upgrades MONITOR → AGREEMENT immediately, carrying over agreed values", async () => {
       const item = await f.task("Shared", { ownership: "EXTERNAL" });
       await acceptToCurrent(f.planA.id, [item.id]);
@@ -1018,22 +1033,15 @@ describe.each(serviceBackends)("services on $name", (backend) => {
         itemId: item.id,
         planId: f.planB.id,
       });
-      const link = await f.services.links.create(f.admin, {
-        type: "MONITOR",
-        fromPlanId: f.planA.id,
-        toPlanId: f.planB.id,
-        referenceId: null,
-        partyIds: [],
-      });
+      const link = await f.services.links.setReferenceType(f.admin, ref.id, { type: "MONITOR" });
       expect((await track(f.planB.id, "AGREED"))?.items).toEqual([]);
 
       const crCountBefore = (await storage.query("changeRequest", { projectId: f.project.id }))
         .length;
-      const upgraded = await f.services.links.changeType(f.admin, link.id, {
-        version: link.version,
+      const upgraded = await f.services.links.setReferenceType(f.admin, ref.id, {
         type: "AGREEMENT",
       });
-      expect(upgraded.type).toBe("AGREEMENT");
+      expect(upgraded).toMatchObject({ id: link.id, type: "AGREEMENT" });
       expect((await storage.query("changeRequest", { projectId: f.project.id })).length).toBe(
         crCountBefore,
       );

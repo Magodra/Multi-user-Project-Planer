@@ -49,8 +49,6 @@ export interface ReferenceTarget {
   planName: string;
   projectId: string;
   projectName: string;
-  /** Type a new reference gets without an explicit choice: from a plan-level link, else MONITOR. */
-  defaultLinkType: LinkType;
 }
 
 /** Values proposed for an external task, waiting for its owner's approval. */

@@ -36,23 +36,13 @@ export function UsedInSection({ view, task }: { view: PlanView; task: Task }) {
   const usedKey = usedIn.map((r) => r.planId).join(",");
   useEffect(() => void loadTargets(), [loadTargets, usedKey]);
 
-  const target = targets?.find((t) => t.planId === planId);
-  const choose = (id: string) => {
-    setPlanId(id);
-    setLinkType(targets?.find((t) => t.planId === id)?.defaultLinkType ?? "MONITOR");
-  };
-  // Only a choice that differs from the plan-level link is stored for this task.
   const add = () =>
     run(async () => {
-      await api.items.addReference({
-        itemId: task.id,
-        planId,
-        ...(linkType !== target?.defaultLinkType && { linkType }),
-      });
+      await api.items.addReference({ itemId: task.id, planId, linkType });
       setPlanId("");
     });
-  const upgrade = (referenceId: string) =>
-    run(() => api.items.setReferenceType(referenceId, { type: "AGREEMENT" }));
+  const setType = (referenceId: string, type: LinkType) =>
+    run(() => api.items.setReferenceType(referenceId, { type }));
 
   const projects = [...new Set((targets ?? []).map((t) => t.projectId))];
   const otherProject = (projectId: string) => projectId !== view.plan.projectId;
@@ -73,14 +63,23 @@ export function UsedInSection({ view, task }: { view: PlanView; task: Task }) {
                 <Badge className={badge.className} title={badge.title}>
                   {badge.label}
                 </Badge>
-                {r.linkType === "MONITOR" && (
+                {r.linkType === "MONITOR" ? (
                   <button
                     type="button"
                     disabled={busy}
-                    onClick={() => void upgrade(r.referenceId)}
+                    onClick={() => void setType(r.referenceId, "AGREEMENT")}
                     title="Agreed values carry over; later changes need approval of both sides"
                   >
                     Upgrade to AGREEMENT
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => void setType(r.referenceId, "MONITOR")}
+                    title="The plan keeps following the task; changes no longer need its approval"
+                  >
+                    Downgrade to MONITOR
                   </button>
                 )}
               </li>
@@ -95,7 +94,7 @@ export function UsedInSection({ view, task }: { view: PlanView; task: Task }) {
         <div className="pp-row">
           <select
             value={planId}
-            onChange={(e) => choose(e.target.value)}
+            onChange={(e) => setPlanId(e.target.value)}
             aria-label="Plan to use the task in"
           >
             <option value="">Choose plan…</option>

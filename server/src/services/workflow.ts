@@ -173,9 +173,9 @@ export async function carryOverAgreed(tx: StorageAdapter, link: PlanLink): Promi
 }
 
 /**
- * Give one reference its own link type (an item-level link, stored with the
- * reference in the recipient's project). An upgrade to AGREEMENT carries over
- * agreed values and needs no approval round.
+ * Set the link type of one reference (stored with the reference, in the
+ * recipient's project). An upgrade to AGREEMENT carries over agreed values and
+ * needs no approval round.
  */
 export async function setReferenceLinkType(
   tx: StorageAdapter,
@@ -183,11 +183,13 @@ export async function setReferenceLinkType(
   audit: AuditService,
   ref: PlanItemReference,
   type: LinkType,
+  partyIds?: string[],
 ): Promise<PlanLink> {
   const [existing] = await tx.query("planLink", { projectId: ref.projectId, referenceId: ref.id });
-  if (existing?.type === type) return existing;
+  const parties = partyIds ?? existing?.partyIds ?? [];
+  if (existing?.type === type && existing.partyIds.join() === parties.join()) return existing;
   const link: PlanLink = existing
-    ? await tx.save("planLink", touch(existing, ctx, { type }))
+    ? await tx.save("planLink", touch(existing, ctx, { type, partyIds: parties }))
     : await tx.save("planLink", {
         ...newMeta(ctx),
         projectId: ref.projectId,
@@ -195,9 +197,10 @@ export async function setReferenceLinkType(
         fromPlanId: ref.ownerPlanId,
         toPlanId: ref.planId,
         referenceId: ref.id,
-        partyIds: [],
+        partyIds: parties,
       });
-  const carried = type === "AGREEMENT" ? await carryOverAgreed(tx, link) : 0;
+  const carried =
+    type === "AGREEMENT" && existing?.type !== "AGREEMENT" ? await carryOverAgreed(tx, link) : 0;
   await audit.record(tx, ctx, {
     projectId: ref.projectId,
     entityType: "planLink",

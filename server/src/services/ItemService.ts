@@ -326,10 +326,6 @@ export class ItemService {
       (await this.storage.query("planItemReference", { itemId })).map((r) => r.planId),
     );
     const targets: ReferenceTarget[] = [];
-    // Plan-level links (same project only) set the default type of a new reference.
-    const planLinks = (
-      await this.storage.query("planLink", { projectId: item.projectId, fromPlanId: item.planId })
-    ).filter((l) => l.referenceId === null);
     for (const project of projects.filter((p) => rootProjectId(p.id, byId) === root)) {
       for (const plan of await this.storage.query("plan", { projectId: project.id })) {
         if (plan.id === item.planId || used.has(plan.id)) continue;
@@ -339,7 +335,6 @@ export class ItemService {
           planName: plan.name,
           projectId: project.id,
           projectName: project.name,
-          defaultLinkType: planLinks.find((l) => l.toPlanId === plan.id)?.type ?? "MONITOR",
         });
       }
     }

@@ -105,15 +105,20 @@ export interface PlanItemReference extends Versioned {
   agreementState: AgreementState;
 }
 
+/**
+ * The link type of one reference (an external task used in another plan).
+ * Without a link a reference is MONITOR. Stored with the reference, in the
+ * recipient plan's project.
+ */
 export interface PlanLink extends Versioned {
   projectId: UUID;
   type: LinkType;
-  /** Owner/source plan. */
+  /** Owner plan of the task. */
   fromPlanId: UUID;
-  /** Recipient plan. */
+  /** Recipient plan (where the task is used). */
   toPlanId: UUID;
-  /** When set, the link applies to a single reference instead of the whole plan pair. */
-  referenceId: UUID | null;
+  /** The reference this link applies to. */
+  referenceId: UUID;
   /** Additional parties that must approve on AGREEMENT links. */
   partyIds: UUID[];
 }
