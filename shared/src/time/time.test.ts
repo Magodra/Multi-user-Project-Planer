@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_CALENDAR,
   addDuration,
+  addWorkingLag,
   durationBetween,
   fromDisplayDate,
   toDisplayDate,
@@ -117,5 +118,31 @@ describe("display dates", () => {
     expect(fromDisplayDate(toDisplayDate("2026-01-05T09:30:00.000Z", "hours"), "hours")).toBe(
       "2026-01-05T09:30:00.000Z",
     );
+  });
+});
+
+describe("addWorkingLag", () => {
+  const at = (d: string, h = "00") => `2026-01-${d}T${h}:00:00.000Z`; // 2026-01-05 is a Monday
+  const friday = at("10"); // end of a task finishing on Friday the 9th
+
+  it("counts working days, skipping weekends, both ways", () => {
+    expect(addWorkingLag(friday, 2, "days")).toBe(at("14")); // Mon, Tue → Wednesday
+    expect(addWorkingLag(friday, -2, "days")).toBe(at("08")); // Fri, Thu → Thursday
+    expect(addWorkingLag(friday, 1, "weeks")).toBe(at("17")); // 5 working days
+    expect(addWorkingLag(friday, 0, "days")).toBe(friday);
+  });
+
+  it("respects holidays", () => {
+    const calendar = { ...DEFAULT_CALENDAR, holidays: ["2026-01-12"] };
+    expect(addWorkingLag(friday, 1, "days", calendar)).toBe(at("14"));
+  });
+
+  it("counts working hours, both ways", () => {
+    expect(addWorkingLag(at("09", "16"), 2, "hours")).toBe(at("12", "10")); // Fri 16:00 → Mon 10:00
+    expect(addWorkingLag(at("09", "10"), -3, "hours")).toBe(at("08", "15")); // Fri 10:00 → Thu 15:00
+  });
+
+  it("keeps months as calendar units", () => {
+    expect(addWorkingLag(at("10"), 1, "months")).toBe("2026-02-10T00:00:00.000Z");
   });
 });

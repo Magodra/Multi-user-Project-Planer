@@ -466,6 +466,12 @@ body:has(.pp-workspace) {
 .pp-gantt-host .gantt_task_line.pp-group {
   display: none;
 }
+/* A dependency the successor does not respect: red line and arrow. */
+.pp-gantt-host .gantt_task_link.pp-link-violated,
+.pp-gantt-host .gantt_task_link.pp-link-violated:hover {
+  --dhx-gantt-link-background: var(--pp-late);
+  --dhx-gantt-link-background-hover: var(--pp-late);
+}
 .pp-proposal-bar {
   position: absolute;
   border: 2px dashed var(--pp-pending);

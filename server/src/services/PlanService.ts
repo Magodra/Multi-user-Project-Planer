@@ -1,5 +1,6 @@
 import { normalizeReference } from "../domain/references.js";
 import {
+  checkDependency,
   compareTaskOrder,
   missingTaskNumbers,
   normalizeDependency,
@@ -9,6 +10,7 @@ import {
   type CreatePlanInput,
   type Dependency,
   type Plan,
+  type PlanDependencyIssues,
   type PlanView,
   type RecipientInfo,
   type ResolvedReference,
@@ -93,6 +95,36 @@ export class PlanService {
     for (const p of plans)
       if (await this.access.canDo(ctx, projectId, p.id, "plan.read")) visible.push(p);
     return visible.sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  /** Dependency problems per plan of a project, from the same check as each plan's view. */
+  async dependencyIssues(ctx: ServiceContext, projectId: string): Promise<PlanDependencyIssues[]> {
+    const out: PlanDependencyIssues[] = [];
+    for (const plan of await this.list(ctx, projectId)) {
+      const view = await this.getView(ctx, plan.id);
+      const names = new Map([
+        ...view.items.map((t) => [t.id, t.name] as const),
+        ...view.references.map(
+          (r) => [r.item.id, `${r.item.name} (from ${r.ownerPlanName})`] as const,
+        ),
+      ]);
+      const byId = new Map(view.dependencies.map((d) => [d.id, d]));
+      out.push({
+        planId: plan.id,
+        issues: view.dependencyIssues.map((issue) => {
+          const d = byId.get(issue.dependencyId)!;
+          return {
+            ...issue,
+            type: d.type,
+            lag: d.lag,
+            lagUnit: d.lagUnit,
+            fromName: names.get(d.fromItemId) ?? "",
+            toName: names.get(d.toItemId) ?? "",
+          };
+        }),
+      });
+    }
+    return out;
   }
 
   async get(ctx: ServiceContext, planId: string): Promise<Plan> {
@@ -318,6 +350,11 @@ export class PlanService {
       findTrackBaseline(this.storage, planId, "CURRENT"),
       findTrackBaseline(this.storage, planId, "AGREED"),
     ]);
+    // Lags are working time on this plan's project calendar.
+    const { calendar } = await mustGet(this.storage, "project", projectId);
+    const dependencies = allDeps
+      .filter((d) => visibleIds.has(d.fromItemId) && visibleIds.has(d.toItemId))
+      .map((d) => normalizeDependency(d, shown.get(d.toItemId)!));
     return {
       plan,
       items: numbered.sort(compareTaskOrder),
@@ -328,9 +365,18 @@ export class PlanService {
           { id: b.id, sortOrder: b.sortOrder, name: b.item.name },
         ),
       ),
-      dependencies: allDeps
-        .filter((d) => visibleIds.has(d.fromItemId) && visibleIds.has(d.toItemId))
-        .map((d) => normalizeDependency(d, shown.get(d.toItemId)!)),
+      dependencies,
+      dependencyIssues: dependencies.flatMap((d) => {
+        const check = checkDependency(
+          d,
+          shown.get(d.fromItemId)!,
+          shown.get(d.toItemId)!,
+          calendar,
+        );
+        return check.violated
+          ? [{ dependencyId: d.id, required: check.required, actual: check.actual }]
+          : [];
+      }),
       links: allLinks.filter((l) => l.fromPlanId === planId || l.toPlanId === planId),
       myRoles,
       pendingItemIds: [

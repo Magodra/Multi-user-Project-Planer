@@ -31,6 +31,7 @@ import {
 } from "./items.js";
 import {
   assertNoDependencyCycle,
+  checkDependency,
   assertNotOwnActivity,
   missingTaskNumbers,
   reorderSiblings,
@@ -453,5 +454,60 @@ describe("task order, numbers and dependencies", () => {
     const byId = new Map([parent, child].map((t) => [t.id, t]));
     expect(() => assertNotOwnActivity(parent, child, byId)).toThrow(RuleViolationError);
     expect(() => assertNotOwnActivity(child, parent, byId)).toThrow(RuleViolationError);
+  });
+});
+
+describe("dependency checks", () => {
+  const day = (d: number) => `2026-01-${String(d).padStart(2, "0")}T00:00:00.000Z`;
+  const sched = (start: number, end: number) => ({
+    start: day(start),
+    end: day(end),
+    duration: end - start,
+    granularity: "days" as const,
+  });
+  const dep = (type: "FS" | "SS" | "FF" | "SF", lag = 0) => ({
+    type,
+    lag,
+    lagUnit: "days" as const,
+  });
+  const pred = sched(5, 8); // 5th–7th, ends at the 8th
+
+  it("allows slack and flags a successor that starts or finishes too early", () => {
+    expect(checkDependency(dep("FS"), pred, sched(8, 9), DEFAULT_CALENDAR).violated).toBe(false);
+    expect(checkDependency(dep("FS"), pred, sched(12, 13), DEFAULT_CALENDAR).violated).toBe(false); // slack
+    expect(checkDependency(dep("FS"), pred, sched(7, 9), DEFAULT_CALENDAR)).toEqual({
+      required: day(8),
+      actual: day(7),
+      violated: true,
+    });
+    expect(checkDependency(dep("SS"), pred, sched(5, 6), DEFAULT_CALENDAR).violated).toBe(false);
+    expect(checkDependency(dep("SS"), pred, sched(4, 9), DEFAULT_CALENDAR).violated).toBe(true);
+    expect(checkDependency(dep("FF"), pred, sched(6, 7), DEFAULT_CALENDAR).violated).toBe(true);
+    expect(checkDependency(dep("SF"), pred, sched(1, 5), DEFAULT_CALENDAR).violated).toBe(false);
+  });
+
+  it("counts lag and lead in working days", () => {
+    // Predecessor Wed 7th–Fri 9th (ends Saturday 00:00): FS+2 working days → Wednesday 14th.
+    const endsFriday = sched(7, 10);
+    expect(
+      checkDependency(dep("FS", 2), endsFriday, sched(13, 14), DEFAULT_CALENDAR).violated,
+    ).toBe(true);
+    expect(
+      checkDependency(dep("FS", 2), endsFriday, sched(14, 15), DEFAULT_CALENDAR).violated,
+    ).toBe(false);
+    // A lead of 1 working day before a Friday end allows Friday itself.
+    expect(
+      checkDependency(dep("FS", -1), endsFriday, sched(9, 12), DEFAULT_CALENDAR).violated,
+    ).toBe(false);
+  });
+
+  it("applies lag and lead", () => {
+    expect(checkDependency(dep("FS", 2), pred, sched(9, 10), DEFAULT_CALENDAR).violated).toBe(true);
+    expect(checkDependency(dep("FS", 2), pred, sched(10, 11), DEFAULT_CALENDAR).violated).toBe(
+      false,
+    );
+    expect(checkDependency(dep("FS", -1), pred, sched(7, 9), DEFAULT_CALENDAR).violated).toBe(
+      false,
+    ); // lead
   });
 });

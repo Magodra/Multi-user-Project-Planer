@@ -9,12 +9,15 @@ export interface StatusBadge {
 
 export function itemBadges(input: {
   external: boolean;
-  recipients: number;
+  /** Plans using this external task (names, shown in the tooltip). */
+  recipients: string[];
   reference: boolean;
   linkType: LinkType | null;
   pending: boolean;
   agreementState: AgreementState;
   endVarianceDays: number | null;
+  /** Explanations of dependencies this task does not respect. */
+  dependencyIssues?: string[];
 }): StatusBadge[] {
   const badges: StatusBadge[] = [];
   if (input.reference) {
@@ -37,11 +40,23 @@ export function itemBadges(input: {
       });
   } else if (input.external) {
     badges.push({
-      label: `EXT${input.recipients ? ` ${input.recipients}` : ""}`,
-      title: `External task used in ${input.recipients} other plan(s)`,
+      label: `EXT${input.recipients.length ? ` ${input.recipients.length}` : ""}`,
+      title:
+        input.recipients.length === 0
+          ? "External task, not used in other plans yet"
+          : [
+              `External task used in ${input.recipients.length} other plan(s):`,
+              ...input.recipients.map((n) => `• ${n}`),
+            ].join("\n"),
       className: "pp-b-ext",
     });
   }
+  if (input.dependencyIssues?.length)
+    badges.push({
+      label: "⚠ DEP",
+      title: input.dependencyIssues.join("\n"),
+      className: "pp-b-late",
+    });
   if (input.pending)
     badges.push({ label: "PEND", title: "Pending approval", className: "pp-b-pending" });
   if (input.agreementState === "REJECTED")

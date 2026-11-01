@@ -334,6 +334,12 @@ test("drag tasks from the task list onto another plan to monitor them", async ({
   await expect(monitored("Shared delivery")).toContainText("MON");
   // External tasks are named with their owner plan.
   await expect(monitored("Shared delivery")).toContainText("Shared delivery (from Supplier)");
+  // The owner's EXT badge lists the plans using the task.
+  await expect(
+    page
+      .locator(".pp-outline-row", { hasText: "Shared delivery" })
+      .locator(".pp-badge", { hasText: "EXT 1" }),
+  ).toHaveAttribute("title", "External task used in 1 other plan(s):\n• Customer");
 
   // An internal task is made external first, after confirmation.
   page.once("dialog", (d) => void d.accept());
@@ -721,4 +727,54 @@ test("an external activity follows its subtasks in the plans using it", async ({
     .first()
     .boundingBox())!;
   expect((await bar.boundingBox())!.width).toBeGreaterThan(day.width * 4);
+});
+
+test("marks a dependency whose successor starts too early", async ({ page }, info) => {
+  await signIn(page);
+  const projectName = `Check ${info.project.name} ${Date.now()}`;
+  await page.getByPlaceholder("New project name").fill(projectName);
+  await page.getByRole("button", { name: "Create project", exact: true }).click();
+  await page.getByRole("link", { name: projectName }).click();
+  await page.getByPlaceholder("Plan name").fill("Build");
+  await page.getByRole("button", { name: "Add plan", exact: true }).click();
+  await page.getByRole("button", { name: "Build", exact: true }).click();
+  const row = (name: string) => page.locator(".gantt_row:visible", { hasText: name });
+  for (const name of ["Design", "Code"]) {
+    await page.getByRole("button", { name: "+ Task", exact: true }).click();
+    await page.getByLabel("Name", { exact: true }).fill(name);
+    if (name === "Code") await page.getByRole("dialog").getByLabel("Predecessors").fill("1");
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(row(name)).toBeVisible();
+  }
+
+  // Both start today: Code starts before Design finishes.
+  const link = page.locator(".pp-gantt-panel:visible .gantt_task_link");
+  await expect(link).toHaveClass(/pp-link-violated/);
+  const color = await link
+    .locator(".gantt_line_wrapper div")
+    .first()
+    .evaluate((el) => getComputedStyle(el).backgroundColor);
+  expect(color).toBe("rgb(180, 35, 24)");
+  await expect(row("Code")).toContainText("⚠ DEP");
+
+  // The Project tab shows where the problems are: on the plan and its project.
+  await page.getByRole("tab", { name: "Project" }).click();
+  const tree = page.getByRole("tree", { name: "Project structure" });
+  const planIssues = tree.getByTestId("plan-dependency-issues");
+  await expect(planIssues).toHaveText("⚠ 1");
+  await expect(planIssues.locator(".pp-badge")).toHaveAttribute(
+    "title",
+    /Code: Starts .* for Design/,
+  );
+  await expect(tree.locator(".pp-tree-row").first()).toContainText("⚠ 1");
+  await page.getByRole("tab", { name: "Build" }).click();
+
+  // Moved after Design (with some slack), the dependency is fine.
+  await row("Code").dblclick();
+  await page.getByRole("dialog").getByLabel("Start", { exact: true }).fill("2026-11-12");
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(link).not.toHaveClass(/pp-link-violated/);
+  await expect(row("Code")).not.toContainText("⚠ DEP");
+  await page.getByRole("tab", { name: "Project" }).click();
+  await expect(planIssues).toHaveCount(0);
 });

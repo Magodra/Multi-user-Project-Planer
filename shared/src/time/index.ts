@@ -234,6 +234,64 @@ export function addDuration(
   }
 }
 
+/**
+ * Shift a moment by a dependency lag in working time; a negative amount is a
+ * lead. Hours and days count the calendar's working hours and days, a week
+ * is the calendar's working days per week, months and years are calendar
+ * units. After a task ending on a Friday (end = Saturday 00:00), +2 days gives
+ * Wednesday 00:00 and -2 days gives Thursday 00:00.
+ */
+export function addWorkingLag(
+  iso: IsoDateTime,
+  amount: number,
+  unit: Granularity,
+  calendar: WorkingCalendar = DEFAULT_CALENDAR,
+): IsoDateTime {
+  if (amount === 0) return parseIso(iso).toISOString();
+  switch (unit) {
+    case "months":
+    case "years":
+      return addCalendarUnits(iso, amount, unit);
+    case "weeks":
+      return addWorkingLag(iso, amount * calendar.workingDays.length, "days", calendar);
+    case "days": {
+      if (amount > 0) return addDuration(iso, amount, "days", calendar);
+      assertCalendarUsable(calendar);
+      const at = parseIso(iso);
+      // Count whole working days before the anchor; a day it falls inside counts too.
+      let day = startOfUtcDay(at);
+      if (at.getTime() > day.getTime()) day = addUtcDays(day, 1);
+      let remaining = Math.round(-amount);
+      for (let i = 0; i < MAX_DAYS_SCANNED; i++) {
+        day = addUtcDays(day, -1);
+        if (isWorkingDay(day, calendar) && --remaining === 0) return toIso(day);
+      }
+      throw new RangeError("Lag exceeds scan limit");
+    }
+    case "hours": {
+      if (amount > 0) return addDuration(iso, amount, "hours", calendar);
+      assertCalendarUsable(calendar);
+      let cursor = parseIso(iso).getTime();
+      let remaining = Math.round(-amount * 60) * MS_PER_MINUTE;
+      for (let i = 0; i < MAX_DAYS_SCANNED; i++) {
+        // A cursor at midnight belongs to the previous day.
+        let day = startOfUtcDay(new Date(cursor));
+        if (cursor <= day.getTime()) day = addUtcDays(day, -1);
+        if (isWorkingDay(day, calendar)) {
+          const [ws, we] = workdayBounds(day, calendar);
+          const end = Math.min(cursor, we);
+          if (end > ws) {
+            if (remaining <= end - ws) return toIso(end - remaining);
+            remaining -= end - ws;
+          }
+        }
+        cursor = day.getTime();
+      }
+      throw new RangeError("Lag exceeds scan limit");
+    }
+  }
+}
+
 /** Inverse of `addDuration`: the duration between two timestamps in the given unit. */
 export function durationBetween(
   start: IsoDateTime,

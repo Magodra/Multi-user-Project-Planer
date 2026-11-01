@@ -7,7 +7,7 @@ import { formatForDisplay, type Task } from "@planning/shared";
 import { type StatusBadge, itemBadges } from "../../components/status";
 import { Badge, ErrorText } from "../../components/ui";
 import { usePlanView } from "../../workspace/ProjectContext";
-import { planRows, referenceName } from "./planRows";
+import { planRows, recipientNames, referenceName } from "./planRows";
 import { type PlanItemDragData, usePlanDropTarget } from "../../workspace/panels";
 
 function DraggableItem({
@@ -96,7 +96,7 @@ export function PlanItemsView({ planId }: { planId: string }) {
               number={row.task.taskNumber}
               badges={ownershipBadges({
                 external: row.task.ownership === "EXTERNAL",
-                recipients: view.recipients[row.task.id]?.length ?? 0,
+                recipients: recipientNames(view, row.task.id),
                 reference: false,
                 linkType: null,
               })}
@@ -112,7 +112,7 @@ export function PlanItemsView({ planId }: { planId: string }) {
               number={row.reference.taskNumber}
               badges={ownershipBadges({
                 external: true,
-                recipients: 0,
+                recipients: [],
                 reference: true,
                 linkType: row.reference.linkType,
               })}

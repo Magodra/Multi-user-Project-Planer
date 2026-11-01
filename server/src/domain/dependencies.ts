@@ -1,5 +1,12 @@
 /** Rules for task order, task numbers and dependencies (CLAUDE.md §4). Pure logic, no I/O. */
-import type { Dependency, Granularity } from "@planning/shared";
+import {
+  type Dependency,
+  type Granularity,
+  type Schedule,
+  type WorkingCalendar,
+  addWorkingLag,
+  compareIso,
+} from "@planning/shared";
 import { RuleViolationError } from "./errors.js";
 
 /** Anything placed among siblings in a plan: tasks and references share one order. */
@@ -114,4 +121,33 @@ export function assertNoDependencyCycle(
     seen.add(id);
     stack.push(...(successors.get(id) ?? []));
   }
+}
+
+export interface DependencyCheck {
+  /** Earliest allowed start (FS, SS) or finish (FF, SF) of the successor. */
+  required: string;
+  /** The successor's actual start or finish. */
+  actual: string;
+  /** True when the successor starts or finishes too early; later (slack) is fine. */
+  violated: boolean;
+}
+
+/**
+ * Whether a successor respects a dependency. FS: start ≥ predecessor's end +
+ * lag; SS: start ≥ predecessor's start + lag; FF: end ≥ predecessor's end +
+ * lag; SF: end ≥ predecessor's start + lag. Lag is working time on the
+ * project's calendar (`addWorkingLag`; negative = lead). Slack is allowed.
+ */
+export function checkDependency(
+  dep: Pick<Dependency, "type" | "lag" | "lagUnit">,
+  predecessor: Schedule,
+  successor: Schedule,
+  calendar: WorkingCalendar,
+): DependencyCheck {
+  const fromEnd = dep.type === "FS" || dep.type === "FF";
+  const toStart = dep.type === "FS" || dep.type === "SS";
+  const anchor = fromEnd ? predecessor.end : predecessor.start;
+  const required = addWorkingLag(anchor, dep.lag, dep.lagUnit, calendar);
+  const actual = toStart ? successor.start : successor.end;
+  return { required, actual, violated: compareIso(actual, required) < 0 };
 }

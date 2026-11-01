@@ -43,6 +43,10 @@ export interface GanttLinkRow {
   source: string;
   target: string;
   type: DependencyType;
+  /** The successor starts or finishes too early: drawn in red. */
+  violated: boolean;
+  /** Explanation shown as the link's tooltip. */
+  title: string;
 }
 
 export interface OverlayBar {
@@ -184,6 +188,8 @@ export function createGanttAdapter(callbacks: GanttCallbacks): GanttAdapter {
   ];
   gantt.templates.task_class = (_s: Date, _e: Date, t: Task) =>
     ((t as RowData).pp?.classes ?? []).join(" ");
+  gantt.templates.link_class = (link: Link) =>
+    (link as Link & { pp?: GanttLinkRow }).pp?.violated ? "pp-link-violated" : "";
   gantt.templates.grid_row_class = (_s: Date, _e: Date, t: Task) =>
     (t as RowData).pp?.kind === "group" ? "pp-group-row" : "";
 
@@ -307,6 +313,12 @@ export function createGanttAdapter(callbacks: GanttCallbacks): GanttAdapter {
       fragment.appendChild(el);
     }
     layer.replaceChildren(fragment);
+    for (const el of taskData.querySelectorAll<HTMLElement>(".gantt_task_link")) {
+      const id = el.getAttribute(gantt.config.link_attribute);
+      const link =
+        id && gantt.isLinkExists(id) ? (gantt.getLink(id) as Link & { pp?: GanttLinkRow }) : null;
+      if (link?.pp) el.title = link.pp.title;
+    }
   };
   for (const event of ["onGanttRender", "onDataRender", "onTaskOpened", "onTaskClosed"] as const) {
     gantt.attachEvent(event, drawOverlay);
@@ -378,6 +390,7 @@ export function createGanttAdapter(callbacks: GanttCallbacks): GanttAdapter {
           source: l.source,
           target: l.target,
           type: LINK_TYPES[l.type],
+          pp: l,
         })),
       });
       if (selectedId && gantt.isTaskExists(selectedId)) gantt.selectTask(selectedId);

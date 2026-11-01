@@ -28,7 +28,7 @@ export function PredecessorsField({
       </Field>
       <p className={parsed.ok ? "pp-hint" : "pp-error"}>
         {parsed.ok
-          ? "Task IDs of this plan (also external tasks) with type FS, SS, FF or SF (default FS) and lag in h, d, w, mo or y; a negative lag is a lead."
+          ? "Task IDs of this plan (also external tasks) with type FS, SS, FF or SF (default FS) and lag in working h, d, w (or mo, y); a negative lag is a lead."
           : parsed.error}
       </p>
       {otherPlanLinks.length > 0 && (

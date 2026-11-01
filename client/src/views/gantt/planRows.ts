@@ -63,3 +63,10 @@ export function referenceName(reference: ResolvedReference): string {
     ? `${reference.item.name} (from ${reference.ownerPlanName})`
     : reference.item.name;
 }
+
+/** Names of the plans using an own external task; plans of other projects get their project's name. */
+export function recipientNames(view: PlanView, taskId: string): string[] {
+  return (view.recipients[taskId] ?? []).map((r) =>
+    r.projectId === view.plan.projectId ? r.planName : `${r.planName} (${r.projectName})`,
+  );
+}

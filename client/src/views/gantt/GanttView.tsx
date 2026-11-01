@@ -5,6 +5,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   type Baseline,
+  type DependencyIssue,
   type PlanView,
   type Task,
   formatForDisplay,
@@ -27,7 +28,8 @@ import {
   createGanttAdapter,
 } from "./GanttAdapter";
 import { ItemDialog } from "./ItemDialog";
-import { planRows, referenceName, siblingsOf } from "./planRows";
+import { describeDependencyIssue, lagText } from "./dependencyText";
+import { planRows, recipientNames, referenceName, siblingsOf } from "./planRows";
 import { ReferenceDialog } from "./ReferenceDialog";
 import { predecessorText } from "./predecessors";
 import {
@@ -76,12 +78,13 @@ function buildRows(view: PlanView, agreed: Baseline | null, canEdit: boolean): G
         ].filter(Boolean),
         badges: itemBadges({
           external: t.ownership === "EXTERNAL",
-          recipients: view.recipients[t.id]?.length ?? 0,
+          recipients: recipientNames(view, t.id),
           reference: false,
           linkType: null,
           pending: pending.has(t.id),
           agreementState: t.agreementState,
           endVarianceDays: variance(t.id, t.end),
+          dependencyIssues: issuesFor(view, t.id),
         }),
       };
     }
@@ -109,15 +112,42 @@ function buildRows(view: PlanView, agreed: Baseline | null, canEdit: boolean): G
       ].filter(Boolean),
       badges: itemBadges({
         external: true,
-        recipients: 0,
+        recipients: [],
         reference: true,
         linkType: r.linkType,
         pending: pending.has(t.id),
         agreementState: r.agreementState,
         endVarianceDays: variance(t.id, t.end),
+        dependencyIssues: issuesFor(view, t.id),
       }),
     };
   });
+}
+
+/** Names of all tasks shown in the plan (external ones with their owner plan). */
+function taskNames(view: PlanView): Map<string, string> {
+  return new Map([
+    ...view.items.map((t) => [t.id, t.name] as const),
+    ...view.references.map((r) => [r.item.id, referenceName(r)] as const),
+  ]);
+}
+
+/** Explanation of one dependency problem in this plan. */
+function dependencyIssueText(
+  view: PlanView,
+  issue: DependencyIssue,
+  names: Map<string, string>,
+): string {
+  const dep = view.dependencies.find((d) => d.id === issue.dependencyId)!;
+  return describeDependencyIssue({ ...issue, ...dep, fromName: names.get(dep.fromItemId) ?? "" });
+}
+
+/** Explanations of the dependencies a task does not respect. */
+function issuesFor(view: PlanView, itemId: string): string[] {
+  const names = taskNames(view);
+  return view.dependencyIssues
+    .filter((i) => view.dependencies.find((d) => d.id === i.dependencyId)?.toItemId === itemId)
+    .map((i) => dependencyIssueText(view, i, names));
 }
 
 /** Pending proposals for external tasks, at the proposed dates. */
@@ -282,11 +312,17 @@ export function GanttView({ planId }: { planId: string }) {
 
   useEffect(() => {
     if (!view || !adapterRef.current) return;
+    const issues = new Map(view.dependencyIssues.map((i) => [i.dependencyId, i]));
+    const names = taskNames(view);
     const links: GanttLinkRow[] = view.dependencies.map((d) => ({
       id: d.id,
       source: d.fromItemId,
       target: d.toItemId,
       type: d.type,
+      violated: issues.has(d.id),
+      title: issues.has(d.id)
+        ? dependencyIssueText(view, issues.get(d.id)!, names)
+        : `${names.get(d.fromItemId) ?? ""} → ${names.get(d.toItemId) ?? ""} (${d.type}${lagText(d)})`,
     }));
     adapterRef.current.setData(buildRows(view, agreed, canEdit), links);
     adapterRef.current.setOverlay(buildOverlay(view, selected));

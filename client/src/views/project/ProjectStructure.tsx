@@ -7,10 +7,11 @@
  */
 import { type ReactNode, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import type { Plan, ProjectSummary } from "@planning/shared";
+import type { DependencyIssueSummary, Plan, ProjectSummary } from "@planning/shared";
 import { api } from "../../api/client";
 import { Badge, ErrorText } from "../../components/ui";
 import { withoutInactiveSubtrees } from "../../pages/projectTree";
+import { describeDependencyIssue } from "../gantt/dependencyText";
 import { PlanDialog } from "./PlanDialog";
 import { useLive, useProject } from "../../workspace/ProjectContext";
 import { useWorkspaceActions } from "../../workspace/panels";
@@ -33,6 +34,23 @@ export function ProjectStructure() {
   );
   const childrenOf = (id: string) => visible.filter((p) => p.parentProjectId === id);
   const expanded = new Set(expandedProjectIds);
+
+  // Dependency problems of every plan in the tree (also collapsed subprojects), kept live.
+  const treeIds = [project.id, ...descendantsOf(project.id, visible)];
+  const { data: issueLists } = useLive(
+    () => Promise.all(treeIds.map((pid) => api.plans.dependencyIssues(pid).catch(() => []))),
+    (c) => ISSUE_SOURCES.has(c.entityType),
+    [treeIds.join(",")],
+  );
+  const issuesByPlan = new Map((issueLists ?? []).flat().map((p) => [p.planId, p.issues] as const));
+  const ownIssueCount = new Map(
+    treeIds.map((pid, i) => [
+      pid,
+      (issueLists?.[i] ?? []).reduce((n, p) => n + p.issues.length, 0),
+    ]),
+  );
+  const subtreeIssueCount = (id: string): number =>
+    (ownIssueCount.get(id) ?? 0) + childrenOf(id).reduce((n, c) => n + subtreeIssueCount(c.id), 0);
 
   // Load the plans of expanded subprojects that are not loaded yet.
   const missing = expandedProjectIds.filter(
@@ -78,6 +96,14 @@ export function ProjectStructure() {
               {p?.projectType ?? project.projectType}
             </Badge>
           )}
+          {subtreeIssueCount(id) > 0 && (
+            <Badge
+              className="pp-b-late"
+              title={`${subtreeIssueCount(id)} dependency problem(s) in this project and its subprojects`}
+            >
+              ⚠ {subtreeIssueCount(id)}
+            </Badge>
+          )}
         </div>
         {open && (
           <ul role="group" className="pp-tree-group">
@@ -105,6 +131,7 @@ export function ProjectStructure() {
                       {plan.name}
                     </button>
                     <span className="pp-hint">{plan.planType}</span>
+                    <PlanIssuesBadge issues={issuesByPlan.get(plan.id) ?? []} />
                     <button
                       type="button"
                       className="pp-link pp-tree-edit"
@@ -152,5 +179,29 @@ export function ProjectStructure() {
         />
       )}
     </>
+  );
+}
+
+/** Live changes that can create or resolve dependency problems. */
+const ISSUE_SOURCES = new Set(["task", "dependency", "planItemReference", "plan", "changeRequest"]);
+
+function descendantsOf(rootId: string, projects: ProjectSummary[]): string[] {
+  const out: string[] = [];
+  for (let i = -1, parent = rootId; i < out.length; parent = out[++i]!)
+    for (const p of projects) if (p.parentProjectId === parent) out.push(p.id);
+  return out;
+}
+
+/** "⚠ 2" with the problems listed in the tooltip. */
+function PlanIssuesBadge({ issues }: { issues: DependencyIssueSummary[] }) {
+  if (issues.length === 0) return null;
+  const lines = issues.slice(0, 15).map((i) => `${i.toName}: ${describeDependencyIssue(i)}`);
+  if (issues.length > 15) lines.push(`…and ${issues.length - 15} more`);
+  return (
+    <span data-testid="plan-dependency-issues">
+      <Badge className="pp-b-late" title={[`Dependency problems:`, ...lines].join("\n")}>
+        ⚠ {issues.length}
+      </Badge>
+    </span>
   );
 }

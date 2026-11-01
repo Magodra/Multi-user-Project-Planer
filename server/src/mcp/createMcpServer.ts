@@ -150,7 +150,7 @@ export function createMcpServer(services: Services, ctx: ServiceContext): McpSer
     {
       title: "Set predecessors",
       description:
-        "Replace a task's predecessors in a plan using that plan's local task IDs (own tasks and external tasks used in it), e.g. '4FS+3d; 2SS-1d; 7'. Pass planId to set predecessors of an external task in the plan using it. Types FS, SS, FF, SF (default FS); lag units h, d, w, mo, y (default: the task's granularity); a negative lag is a lead. An empty string removes them.",
+        "Replace a task's predecessors in a plan using that plan's local task IDs (own tasks and external tasks used in it), e.g. '4FS+3d; 2SS-1d; 7'. Pass planId to set predecessors of an external task in the plan using it. Types FS, SS, FF, SF (default FS); lag units h, d, w (working time on the project calendar), mo, y (default: the task's granularity); a negative lag is a lead. An empty string removes them.",
       inputSchema: { itemId: id, ...setPredecessorsInput.shape },
     },
     ({ itemId, ...rest }) =>

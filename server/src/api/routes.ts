@@ -136,6 +136,10 @@ export function apiRoutes(s: Services): Router {
 
   // Plans
   r.get(
+    "/projects/:id/dependency-issues",
+    async (req, res) => void res.json(await s.plans.dependencyIssues(ctxOf(req), p(req, "id"))),
+  );
+  r.get(
     "/projects/:id/plans",
     async (req, res) => void res.json(await s.plans.list(ctxOf(req), p(req, "id"))),
   );

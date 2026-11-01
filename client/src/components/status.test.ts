@@ -3,7 +3,7 @@ import { itemBadges } from "./status";
 
 const base = {
   external: false,
-  recipients: 0,
+  recipients: [],
   reference: false,
   linkType: null,
   pending: false,
@@ -23,9 +23,9 @@ describe("itemBadges", () => {
     expect(
       itemBadges({ ...base, reference: true, linkType: "MONITOR" }).map((b) => b.label),
     ).toEqual(["REF", "MON"]);
-    expect(itemBadges({ ...base, external: true, recipients: 2 }).map((b) => b.label)).toEqual([
-      "EXT 2",
-    ]);
+    const ext = itemBadges({ ...base, external: true, recipients: ["Customer", "Site (Sub)"] });
+    expect(ext[0]?.title).toBe("External task used in 2 other plan(s):\n• Customer\n• Site (Sub)");
+    expect(ext.map((b) => b.label)).toEqual(["EXT 2"]);
   });
 
   it("shows pending, rejected and variance against agreed", () => {

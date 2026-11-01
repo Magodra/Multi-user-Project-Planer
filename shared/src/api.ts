@@ -1,5 +1,7 @@
 /** Response shapes of the REST API and MCP tools, plus realtime messages. */
 import type {
+  Granularity,
+  DependencyType,
   AgreementState,
   Approval,
   Baseline,
@@ -51,6 +53,31 @@ export interface ReferenceTarget {
   projectName: string;
 }
 
+/** A dependency whose successor starts (FS, SS) or finishes (FF, SF) too early. Slack is fine. */
+export interface DependencyIssue {
+  dependencyId: string;
+  /** Earliest allowed start or finish of the successor. */
+  required: string;
+  /** Its actual start or finish. */
+  actual: string;
+}
+
+/** A dependency problem with names, for summaries outside the plan's Gantt. */
+export interface DependencyIssueSummary extends DependencyIssue {
+  type: DependencyType;
+  lag: number;
+  lagUnit: Granularity;
+  /** Predecessor and successor names (external tasks with their owner plan). */
+  fromName: string;
+  toName: string;
+}
+
+/** Dependency problems of one plan (only plans the user can read). */
+export interface PlanDependencyIssues {
+  planId: string;
+  issues: DependencyIssueSummary[];
+}
+
 /** Values proposed for an external task, waiting for its owner's approval. */
 export interface ProposedChange {
   changeRequestId: string;
@@ -88,6 +115,8 @@ export interface PlanView {
   pendingItemIds: string[];
   /** Pending changes proposed from recipient plans (PROPOSE_TASK_CHANGE) for tasks shown here. */
   proposedChanges: ProposedChange[];
+  /** Dependencies the successor does not respect (starts or finishes too early). */
+  dependencyIssues: DependencyIssue[];
   /** Plans (possibly in other projects of the tree) using each external task owned by this plan. */
   recipients: Record<string, RecipientInfo[]>;
   /** Ids of this plan's Current and Agreed track baselines. */

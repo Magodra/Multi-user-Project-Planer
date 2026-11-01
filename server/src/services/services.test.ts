@@ -351,6 +351,35 @@ describe.each(serviceBackends)("services on $name", (backend) => {
       expect(await set("")).toEqual([]);
     });
 
+    it("reports dependencies whose successor starts too early, allowing slack", async () => {
+      const design = await f.task("Design", { duration: 5 });
+      const build = await f.task("Build", { duration: 2 }); // starts with Design: too early
+      const [dep] = await f.services.items.setPredecessors(f.alice, build.id, {
+        predecessors: `${design.taskNumber}FS`,
+      });
+      const view = await f.services.plans.getView(f.alice, f.planA.id);
+      expect(view.dependencyIssues).toEqual([
+        { dependencyId: dep!.id, required: design.end, actual: build.start },
+      ]);
+      // The project summary lists it per plan, with names.
+      const summary = await f.services.plans.dependencyIssues(f.admin, f.project.id);
+      expect(summary.find((p) => p.planId === f.planA.id)?.issues).toEqual([
+        expect.objectContaining({
+          dependencyId: dep!.id,
+          fromName: "Design",
+          toName: "Build",
+          type: "FS",
+        }),
+      ]);
+      expect(summary.find((p) => p.planId === f.planB.id)?.issues).toEqual([]);
+      // Moving Build after Design (with slack) resolves it.
+      await f.services.items.move(f.alice, build.id, {
+        version: (await f.services.items.get(f.alice, build.id)).version,
+        start: "2026-01-19T00:00:00.000Z",
+      });
+      expect((await f.services.plans.getView(f.alice, f.planA.id)).dependencyIssues).toEqual([]);
+    });
+
     it("rejects unknown task numbers, loops and links to the task's own activity", async () => {
       const parent = await f.task("Phase");
       const child = await f.task("Work", { parentId: parent.id });

@@ -29,6 +29,7 @@ import type {
   MoveTaskInput,
   PendingApproval,
   Plan,
+  PlanDependencyIssues,
   PlanItemReference,
   PlanLink,
   PlanView,
@@ -144,6 +145,8 @@ export const api = {
   },
   plans: {
     list: (projectId: string) => get<Plan[]>(`/api/projects/${enc(projectId)}/plans`),
+    dependencyIssues: (projectId: string) =>
+      get<PlanDependencyIssues[]>(`/api/projects/${enc(projectId)}/dependency-issues`),
     create: (projectId: string, input: CreatePlanInput) =>
       post<Plan>(`/api/projects/${enc(projectId)}/plans`, input),
     view: (planId: string) => get<PlanView>(`/api/plans/${enc(planId)}/view`),
