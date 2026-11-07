@@ -1,7 +1,7 @@
 /**
  * The current project as a tree: under each project first its plans, then its
  * subprojects. Subprojects expand on demand; the expanded set is saved in the
- * user's workspace for this project. Plans of subprojects open in this
+ * user's workspace for this project. Timelines are listed after the plans. Plans of subprojects open in this
  * workspace too. Inactive subprojects are hidden with their subtrees, as on
  * the projects page.
  */
@@ -34,6 +34,15 @@ export function ProjectStructure() {
   );
   const childrenOf = (id: string) => visible.filter((p) => p.parentProjectId === id);
   const expanded = new Set(expandedProjectIds);
+
+  // Timelines of the open projects, kept live.
+  const openIds = treeIdsOpen(project.id, expandedProjectIds, visible);
+  const { data: timelineLists } = useLive(
+    () => Promise.all(openIds.map((pid) => api.timelines.list(pid).catch(() => []))),
+    (c) => c.entityType === "timeline",
+    [openIds.join(",")],
+  );
+  const timelinesOf = new Map(openIds.map((pid, i) => [pid, timelineLists?.[i] ?? []] as const));
 
   // Dependency problems of every plan in the tree (also collapsed subprojects), kept live.
   const treeIds = [project.id, ...descendantsOf(project.id, visible)];
@@ -143,11 +152,38 @@ export function ProjectStructure() {
                   </div>
                 </li>
               ))}
-            {Array.isArray(nodePlans) && nodePlans.length === 0 && children.length === 0 && (
-              <li className="pp-hint" style={{ paddingLeft: `${(depth + 1) * 1.2 + 1.8}rem` }}>
-                No plans or subprojects.
+            {(timelinesOf.get(id) ?? []).map((timeline) => (
+              <li key={timeline.id} role="treeitem" aria-selected={false}>
+                <div
+                  className="pp-tree-row pp-tree-timeline"
+                  style={{ paddingLeft: `${(depth + 1) * 1.2}rem` }}
+                >
+                  <span className="pp-tree-toggle" aria-hidden />
+                  <button
+                    type="button"
+                    className="pp-link"
+                    onClick={() =>
+                      openPanel(
+                        "timeline",
+                        { timelineId: timeline.id },
+                        isRoot ? timeline.name : `${timeline.name} (${name})`,
+                      )
+                    }
+                  >
+                    {timeline.name}
+                  </button>
+                  <span className="pp-hint">timeline</span>
+                </div>
               </li>
-            )}
+            ))}
+            {Array.isArray(nodePlans) &&
+              nodePlans.length === 0 &&
+              (timelinesOf.get(id) ?? []).length === 0 &&
+              children.length === 0 && (
+                <li className="pp-hint" style={{ paddingLeft: `${(depth + 1) * 1.2 + 1.8}rem` }}>
+                  No plans or subprojects.
+                </li>
+              )}
             {children.map((c) => renderNode(c, depth + 1))}
           </ul>
         )}
@@ -204,4 +240,10 @@ function PlanIssuesBadge({ issues }: { issues: DependencyIssueSummary[] }) {
       </Badge>
     </span>
   );
+}
+
+/** The root and the expanded projects that are visible in the tree. */
+function treeIdsOpen(rootId: string, expanded: string[], projects: ProjectSummary[]): string[] {
+  const visible = new Set(projects.map((p) => p.id));
+  return [rootId, ...expanded.filter((id) => id !== rootId && visible.has(id))];
 }

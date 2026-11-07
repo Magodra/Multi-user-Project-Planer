@@ -1,3 +1,4 @@
+import type { TimelinePlacement } from "@planning/shared";
 import { createContext, useContext } from "react";
 import { useDroppable } from "@dnd-kit/core";
 
@@ -62,8 +63,19 @@ export function usePlanDropTarget(panel: string, planId: string) {
   };
 }
 
+/** A line of a timeline row: above the timeline (callouts), on it (bars) or below. */
 export interface TimelineRowDropData {
   type: "timeline-row";
   timelineId: string;
   rowId: string;
+  placement: TimelinePlacement;
+  line: number;
+}
+
+/** An entry already on a timeline, dragged to another line, area or row. */
+export interface TimelineEntryDragData {
+  type: "timeline-entry";
+  timelineId: string;
+  entryId: string;
+  name: string;
 }

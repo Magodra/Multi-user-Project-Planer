@@ -226,7 +226,8 @@ export class PlanService {
       for (const t of tasks) await tx.delete("task", t.id, t.version);
       for (const a of await tx.query("roleAssignment", { projectId, planId }))
         await tx.delete("roleAssignment", a.id, a.version);
-      for (const t of await tx.query("timeline", { projectId })) {
+      // Timelines of any project can show the plan's tasks.
+      for (const t of await tx.query("timeline")) {
         const entries = t.entries.filter((e) => e.planId !== planId);
         if (entries.length !== t.entries.length)
           await tx.save("timeline", touch(t, ctx, { entries }));

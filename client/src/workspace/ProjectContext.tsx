@@ -21,6 +21,8 @@ interface ProjectData {
   reloadPlans(): Promise<void>;
   /** Subscribe to live changes from other users (and this one). */
   onChange(listener: (change: Change) => void): () => void;
+  /** Also receive live changes of another project (e.g. tasks shown on a timeline). */
+  watchProject(projectId: string): void;
 }
 
 const Ctx = createContext<ProjectData | null>(null);
@@ -29,6 +31,7 @@ export function ProjectProvider({ project, children }: { project: Project; child
   const [plans, setPlans] = useState<Plan[]>([]);
   const [users, setUsers] = useState<PublicUser[]>([]);
   const listeners = useRef(new Set<(c: Change) => void>());
+  const connectionRef = useRef<RealtimeConnection | null>(null);
 
   const reloadPlans = useCallback(
     async () => setPlans(await api.plans.list(project.id)),
@@ -39,6 +42,7 @@ export function ProjectProvider({ project, children }: { project: Project; child
     void reloadPlans();
     void api.users.list().then(setUsers);
     const connection = new RealtimeConnection(project.id);
+    connectionRef.current = connection;
     // Subproject plans can be opened in this workspace: keep them live too.
     void api.projects.list().then(
       (all) => {
@@ -56,14 +60,18 @@ export function ProjectProvider({ project, children }: { project: Project; child
     };
   }, [project.id, reloadPlans]);
 
+  const watchProject = useCallback(
+    (projectId: string) => connectionRef.current?.watch(projectId),
+    [],
+  );
   const onChange = useCallback((listener: (c: Change) => void) => {
     listeners.current.add(listener);
     return () => void listeners.current.delete(listener);
   }, []);
 
   const value = useMemo(
-    () => ({ project, plans, users, reloadPlans, onChange }),
-    [project, plans, users, reloadPlans, onChange],
+    () => ({ project, plans, users, reloadPlans, onChange, watchProject }),
+    [project, plans, users, reloadPlans, onChange, watchProject],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

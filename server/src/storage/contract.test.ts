@@ -142,7 +142,7 @@ describe.each(allBackends)("StorageAdapter contract: $name", (backend) => {
       end: NOW,
       scale: "weeks",
       rows: [{ id: "r1", name: "Row" }],
-      entries: [{ id: "e1", rowId: "r1", itemId: "i1", planId: "p1" }],
+      entries: [{ id: "e1", rowId: "r1", itemId: "i1", planId: "p1", placement: "on", line: 0 }],
     };
     await storage.save("timeline", timeline);
     const updated = await storage.save("timeline", { ...timeline, version: 1, entries: [] });

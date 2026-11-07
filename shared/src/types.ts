@@ -232,12 +232,21 @@ export interface TimelineRow {
   name: string;
 }
 
+/** Where an entry sits in its row: a callout above the timeline, a bar on it, or a callout below. */
+export type TimelinePlacement = "above" | "on" | "below";
+
 export interface TimelineEntry {
   id: string;
   rowId: string;
   /** References the plan item — the timeline never copies dates. */
   itemId: UUID;
   planId: UUID;
+  placement: TimelinePlacement;
+  /**
+   * Line within the placement area, from 0. For callouts, line 0 is nearest
+   * the timeline; for bars, line 0 is the top line.
+   */
+  line: number;
 }
 
 export interface Timeline extends Versioned {

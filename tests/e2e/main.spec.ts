@@ -1,5 +1,5 @@
 /** Main flows, run in both hosted and file:// mode against the same server. */
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 
 const API = "http://localhost:8181";
 const PASSWORD = "e2e-password";
@@ -68,6 +68,10 @@ test("drag a plan task into a timeline", async ({ page }, info) => {
   await page.getByRole("button", { name: "+ Task", exact: true }).click();
   await page.getByLabel("Name").fill("Kick-off");
   await page.getByRole("button", { name: "Save", exact: true }).click();
+  await page.getByRole("button", { name: "+ Task", exact: true }).click();
+  await page.getByLabel("Name", { exact: true }).fill("Go-live");
+  await page.getByRole("dialog").getByLabel("Duration", { exact: true }).fill("0");
+  await page.getByRole("button", { name: "Save", exact: true }).click();
 
   await page.getByRole("button", { name: "Task List", exact: true }).click();
   page.once("dialog", (d) => void d.accept("Roadmap"));
@@ -79,17 +83,57 @@ test("drag a plan task into a timeline", async ({ page }, info) => {
     .getByRole("tab", { name: "Tasks: Delivery" })
     .dragTo(page.locator(".dv-groupview").first(), { targetPosition: { x: 5, y: 200 } });
   const source = page.locator(".pp-outline-row", { hasText: "Kick-off" });
-  const lane = page.locator(".pp-tl-lane").first();
+  const drag = async (from: Locator, to: Locator) => {
+    const a = (await from.boundingBox())!;
+    const b = (await to.boundingBox())!;
+    const x = a.x + 4; // grab near the left edge (the remove button sits on the right)
+    await page.mouse.move(x, a.y + a.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(x + 20, a.y + a.height / 2, { steps: 5 });
+    await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2, { steps: 20 });
+    await page.mouse.up();
+  };
+  const firstRow = page.locator('[data-testid^="timeline-row-"]').first();
+  const line = (placement: string, n: number) =>
+    firstRow.locator(`[data-testid$="-${placement}-${n}"]`);
+  const entry = page.getByTestId("timeline-entry").filter({ hasText: "Kick-off" });
   await expect(source).toBeVisible();
-  await expect(lane).toBeVisible();
-  const from = (await source.boundingBox())!;
-  const to = (await lane.boundingBox())!;
-  await page.mouse.move(from.x + 10, from.y + from.height / 2);
-  await page.mouse.down();
-  await page.mouse.move(from.x + 30, from.y + from.height / 2, { steps: 5 });
-  await page.mouse.move(to.x + to.width / 2, to.y + to.height / 2, { steps: 20 });
-  await page.mouse.up();
-  await expect(lane.locator(".pp-tl-entry", { hasText: "Kick-off" })).toBeVisible();
+  await drag(source, line("on", 0));
+  await expect(entry).toHaveAttribute("data-placement", "on");
+
+  // Out of the timeline into a callout above, then below, then back on a new line.
+  await drag(entry, line("above", 0));
+  await expect(entry).toHaveAttribute("data-placement", "above");
+  await expect(entry).toHaveClass(/pp-tl-callout/);
+  await drag(entry, line("below", 0));
+  await expect(entry).toHaveAttribute("data-placement", "below");
+  await drag(entry, line("on", 0));
+  await expect(entry).toHaveAttribute("data-placement", "on");
+  await expect(entry).toHaveAttribute("data-line", "0");
+
+  // A milestone is a diamond followed by its name.
+  await drag(page.locator(".pp-outline-row", { hasText: "Go-live" }), line("on", 1));
+  const milestone = page.getByTestId("timeline-entry").filter({ hasText: "Go-live" });
+  await expect(milestone.locator(".pp-tl-diamond")).toHaveText("◆");
+  await expect(milestone).toContainText("◆Go-live");
+
+  // Rows can be renamed and reordered.
+  await page.getByPlaceholder("New row").fill("Milestones");
+  await page.getByRole("button", { name: "Add row", exact: true }).click();
+  const names = page.getByLabel("Row name");
+  await expect(names).toHaveCount(2);
+  await names.first().fill("Delivery work");
+  await names.first().press("Enter");
+  await page.getByRole("button", { name: "Move row Milestones up", exact: true }).click();
+  await expect(names.first()).toHaveValue("Milestones");
+  await expect(names.nth(1)).toHaveValue("Delivery work");
+
+  // The Project tab lists the timeline next to the plans and opens it.
+  await page.getByRole("tab", { name: "Project" }).click();
+  const tree = page.getByRole("tree", { name: "Project structure" });
+  await expect(tree.locator(".pp-tree-timeline")).toContainText("Roadmap");
+  await tree.getByRole("button", { name: "Roadmap", exact: true }).click();
+  await expect(page.getByLabel("Timeline name")).toHaveValue("Roadmap");
 });
 
 test("edit a project's details, parent and active state", async ({ page }, info) => {

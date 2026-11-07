@@ -196,7 +196,9 @@ describe.each(serviceBackends)("services on $name", (backend) => {
       });
       await f.services.timelines.update(f.alice, tl.id, {
         version: tl.version,
-        entries: [{ id: "e1", rowId: "r1", itemId: a.id, planId: f.planA.id }],
+        entries: [
+          { id: "e1", rowId: "r1", itemId: a.id, planId: f.planA.id, placement: "on", line: 0 },
+        ],
       });
       const def = await f.services.reports.create(f.alice, f.project.id, {
         name: "Status",
@@ -1309,18 +1311,22 @@ describe.each(serviceBackends)("services on $name", (backend) => {
       });
       const updated = await f.services.timelines.update(f.alice, tl.id, {
         version: tl.version,
-        entries: [{ id: "e1", rowId: "r1", itemId: t.id, planId: f.planA.id }],
+        entries: [
+          { id: "e1", rowId: "r1", itemId: t.id, planId: f.planA.id, placement: "on", line: 0 },
+        ],
       });
       expect(updated.entries).toEqual([
-        { id: "e1", rowId: "r1", itemId: t.id, planId: f.planA.id },
+        { id: "e1", rowId: "r1", itemId: t.id, planId: f.planA.id, placement: "on", line: 0 },
       ]);
       await expect(
         f.services.timelines.update(f.alice, tl.id, {
           version: updated.version,
-          entries: [{ id: "e2", rowId: "nope", itemId: t.id, planId: f.planA.id }],
+          entries: [
+            { id: "e2", rowId: "nope", itemId: t.id, planId: f.planA.id, placement: "on", line: 0 },
+          ],
         }),
       ).rejects.toBeInstanceOf(ValidationError);
-      // Tasks of another project (e.g. a subproject) cannot be placed on this timeline.
+      // Tasks of any other project can be placed on the timeline, by users who can read them.
       const sub = await f.services.projects.create(f.admin, {
         name: "Sub",
         projectType: "",
@@ -1343,12 +1349,35 @@ describe.each(serviceBackends)("services on $name", (backend) => {
         notes: "",
         ownership: "INTERNAL",
       });
+      const foreignEntry = {
+        id: "e3",
+        rowId: "r1",
+        itemId: foreign.id,
+        planId: subPlan.id,
+        placement: "on" as const,
+        line: 0,
+      };
       await expect(
-        f.services.timelines.update(f.admin, tl.id, {
+        f.services.timelines.update(f.alice, tl.id, {
           version: updated.version,
-          entries: [{ id: "e3", rowId: "r1", itemId: foreign.id, planId: subPlan.id }],
+          entries: [...updated.entries, foreignEntry],
         }),
-      ).rejects.toThrow(/belongs to another project/);
+      ).rejects.toBeInstanceOf(ForbiddenError);
+      const withForeign = await f.services.timelines.update(f.admin, tl.id, {
+        version: updated.version,
+        entries: [...updated.entries, foreignEntry],
+      });
+      expect(withForeign.entries.map((e) => e.itemId)).toContain(foreign.id);
+      // Deleting the other project's plan removes its tasks from this timeline.
+      await f.services.items.delete(f.admin, foreign.id, foreign.version);
+      await f.services.plans.delete(
+        f.admin,
+        subPlan.id,
+        (await storage.get("plan", subPlan.id))!.version,
+      );
+      expect((await storage.get("timeline", tl.id))?.entries.map((e) => e.itemId)).not.toContain(
+        foreign.id,
+      );
     });
 
     it("generates deterministic reports in all formats", async () => {

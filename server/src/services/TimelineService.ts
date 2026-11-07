@@ -1,3 +1,4 @@
+import { normalizeTimelineEntries } from "../domain/timelines.js";
 import type {
   CreateTimelineInput,
   Timeline,
@@ -24,15 +25,15 @@ export class TimelineService {
 
   async list(ctx: ServiceContext, projectId: string): Promise<Timeline[]> {
     await this.access.require(ctx, projectId, null, "project.read");
-    return (await this.storage.query("timeline", { projectId })).sort((a, b) =>
-      a.name.localeCompare(b.name),
-    );
+    return (await this.storage.query("timeline", { projectId }))
+      .map(normalize)
+      .sort((a, b) => a.name.localeCompare(b.name));
   }
 
   async get(ctx: ServiceContext, timelineId: string): Promise<Timeline> {
     const t = await mustGet(this.storage, "timeline", timelineId);
     await this.access.require(ctx, t.projectId, null, "project.read");
-    return t;
+    return normalize(t);
   }
 
   async create(
@@ -65,10 +66,13 @@ export class TimelineService {
   ): Promise<Timeline> {
     const existing = await mustGet(this.storage, "timeline", timelineId);
     await this.access.require(ctx, existing.projectId, null, "project.read");
-    for (const planId of new Set((input.entries ?? []).map((e) => e.planId))) {
-      if (!(await this.access.canDo(ctx, existing.projectId, planId, "plan.read"))) {
+    // Tasks can come from any project; adding one needs read access to its plan.
+    const known = new Set(existing.entries.map((e) => `${e.itemId}|${e.planId}`));
+    const added = (input.entries ?? []).filter((e) => !known.has(`${e.itemId}|${e.planId}`));
+    for (const planId of new Set(added.map((e) => e.planId))) {
+      const plan = await this.storage.get("plan", planId);
+      if (!plan || !(await this.access.canDo(ctx, plan.projectId, planId, "plan.read")))
         throw new ForbiddenError(`No access to plan ${planId}`);
-      }
     }
     const saved = await this.storage.transaction(async (tx) => {
       const current = await mustGet(tx, "timeline", timelineId);
@@ -82,15 +86,11 @@ export class TimelineService {
       for (const entry of next.entries) {
         if (!rowIds.has(entry.rowId)) throw new ValidationError(`Unknown row ${entry.rowId}`);
         const item = await tx.get("task", entry.itemId);
-        if (item && item.projectId !== current.projectId)
-          throw new ValidationError(
-            `'${item.name}' belongs to another project; timelines show tasks of their own project only`,
-          );
         if (!item || item.planId !== entry.planId) {
           throw new ValidationError(`Item ${entry.itemId} is not in plan ${entry.planId}`);
         }
       }
-      const t = await tx.save("timeline", touch(current, ctx, changes));
+      const t = normalize(await tx.save("timeline", touch(normalize(current), ctx, changes)));
       await this.audit.record(tx, ctx, {
         projectId: current.projectId,
         entityType: "timeline",
@@ -180,3 +180,8 @@ export class WorkspaceService {
     await this.storage.delete("workspace", current.id, current.version);
   }
 }
+
+const normalize = (t: Timeline): Timeline => ({
+  ...t,
+  entries: normalizeTimelineEntries(t.entries),
+});

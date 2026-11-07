@@ -96,6 +96,8 @@ export const TABLES: Record<EntityType, TableSpec> = {
         s("rowId", "row_id"),
         s("itemId", "item_id"),
         s("planId", "plan_id"),
+        s("placement", "placement"),
+        { field: "line", column: "line", kind: "number" },
       ],
     },
   },

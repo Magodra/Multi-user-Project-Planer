@@ -8,6 +8,7 @@ import {
   type PlanLink,
   type Project,
   type Task,
+  type TimelineEntry,
 } from "@planning/shared";
 import {
   assertAcceptanceGranularity,
@@ -37,6 +38,7 @@ import {
   reorderSiblings,
 } from "./dependencies.js";
 import { assertValidProjectParent, normalizeProject } from "./projects.js";
+import { normalizeTimelineEntries } from "./timelines.js";
 import { carryOverAgreedValues, effectiveLinkType, splitPlanLevelLink } from "./links.js";
 import { can, effectiveRoles } from "./permissions.js";
 
@@ -509,5 +511,26 @@ describe("dependency checks", () => {
     expect(checkDependency(dep("FS", -1), pred, sched(7, 9), DEFAULT_CALENDAR).violated).toBe(
       false,
     ); // lead
+  });
+});
+
+describe("timeline entries", () => {
+  it("reads entries stored before placement existed as bars spread over three lines", () => {
+    const legacy = ["a", "b", "c", "d"].map(
+      (id) => ({ id, rowId: "r1", itemId: id, planId: "p" }) as unknown as TimelineEntry,
+    );
+    const placed = { id: "e", rowId: "r1", itemId: "e", planId: "p", placement: "above", line: 2 };
+    expect(
+      normalizeTimelineEntries([...legacy, placed as TimelineEntry]).map((e) => [
+        e.placement,
+        e.line,
+      ]),
+    ).toEqual([
+      ["on", 0],
+      ["on", 1],
+      ["on", 2],
+      ["on", 0],
+      ["above", 2],
+    ]);
   });
 });
