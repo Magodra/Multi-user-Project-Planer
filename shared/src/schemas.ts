@@ -234,6 +234,10 @@ export const workspaceViewStateSchema = z.object({
   expandedProjectIds: z.array(id),
 });
 
+export const userPreferencesSchema = z.object({
+  expandedProjectIds: z.array(id),
+});
+
 export const saveWorkspaceInput = z.object({
   version: z.number().int().optional(),
   name: z.string().min(1),

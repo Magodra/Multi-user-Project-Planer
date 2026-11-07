@@ -46,6 +46,18 @@ export function withoutInactiveSubtrees(projects: ProjectSummary[]): ProjectSumm
   return projects.filter((p) => !hidden.has(p.id));
 }
 
+/** Ids of the projects above a project, nearest first. */
+export function ancestorIds(projects: ProjectSummary[], id: string): string[] {
+  const byId = new Map(projects.map((p) => [p.id, p]));
+  const result: string[] = [];
+  let cursor = byId.get(id)?.parentProjectId ?? null;
+  while (cursor && !result.includes(cursor) && cursor !== id) {
+    result.push(cursor);
+    cursor = byId.get(cursor)?.parentProjectId ?? null;
+  }
+  return result;
+}
+
 /** "Parent / Child" path, for parent pickers. */
 export function projectPath(projects: ProjectSummary[], id: string): string {
   const byId = new Map(projects.map((p) => [p.id, p]));

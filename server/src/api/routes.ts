@@ -22,6 +22,7 @@ import {
   reportDefinitionInput,
   runReportInput,
   saveWorkspaceInput,
+  userPreferencesSchema,
   setPredecessorsInput,
   setReferenceTypeInput,
   updateBaselineItemInput,
@@ -55,6 +56,9 @@ export function apiRoutes(s: Services): Router {
       createUserInput.parse(req.body),
     );
     res.status(201).json(user);
+  });
+  r.put("/users/me/preferences", async (req, res) => {
+    res.json(await s.users.setPreferences(ctxOf(req), userPreferencesSchema.parse(req.body)));
   });
   r.put("/users/:id/parties", async (req, res) => {
     const { partyIds } = z.object({ partyIds: z.array(z.string()) }).parse(req.body);

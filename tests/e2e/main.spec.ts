@@ -165,6 +165,22 @@ test("edit a project's details, parent and active state", async ({ page }, info)
   await expect(renamed).toContainText("Contract");
   await expect(renamed).toContainText("Delivery phase");
 
+  // The tree is expandable; the expanded state is kept in the user's profile.
+  const toggle = page.getByRole("button", { name: new RegExp(`(Expand|Collapse) ${parent}$`) });
+  await expect(toggle).toHaveAttribute("aria-expanded", "true");
+  const saved = () => page.waitForResponse((r) => r.url().endsWith("/api/users/me/preferences"));
+  await Promise.all([saved(), toggle.click()]);
+  await expect(page.getByRole("link", { name: `${child} renamed` })).toHaveCount(0);
+  await page.getByRole("button", { name: "Sign out", exact: true }).click();
+  await signIn(page);
+  await expect(page.getByRole("link", { name: parent, exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: `${child} renamed` })).toHaveCount(0);
+  await Promise.all([saved(), toggle.click()]);
+  await expect(toggle).toHaveAttribute("aria-expanded", "true");
+  await page.getByRole("button", { name: "Sign out", exact: true }).click();
+  await signIn(page);
+  await expect(renamed).toBeVisible();
+
   // Deactivate: hidden by default, shown again with the toggle.
   await renamed.getByRole("button", { name: "Edit", exact: true }).click();
   await dialog.getByLabel("Active", { exact: true }).uncheck();
@@ -814,8 +830,9 @@ test("marks a dependency whose successor starts too early", async ({ page }, inf
   await page.getByRole("tab", { name: "Build" }).click();
 
   // Moved after Design (with some slack), the dependency is fine.
+  const later = new Date(Date.now() + 30 * 86_400_000).toISOString().slice(0, 10);
   await row("Code").dblclick();
-  await page.getByRole("dialog").getByLabel("Start", { exact: true }).fill("2026-11-12");
+  await page.getByRole("dialog").getByLabel("Start", { exact: true }).fill(later);
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect(link).not.toHaveClass(/pp-link-violated/);
   await expect(row("Code")).not.toContainText("⚠ DEP");

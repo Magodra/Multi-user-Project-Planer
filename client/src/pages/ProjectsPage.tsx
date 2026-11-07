@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import type { Project, ProjectSummary } from "@planning/shared";
 import { api } from "../api/client";
@@ -9,6 +9,7 @@ import { ProjectWorkspace } from "../workspace/ProjectWorkspace";
 import { ProjectDialog } from "./ProjectDialog";
 import {
   type ProjectNode,
+  ancestorIds,
   buildProjectTree,
   parentOptions,
   withoutInactiveSubtrees,
@@ -16,9 +17,13 @@ import {
 
 function ProjectTree({
   nodes,
+  expanded,
+  onToggle,
   onEdit,
 }: {
   nodes: ProjectNode[];
+  expanded: ReadonlySet<string>;
+  onToggle(projectId: string, open: boolean): void;
   onEdit(project: ProjectSummary): void;
 }) {
   return (
@@ -27,6 +32,20 @@ function ProjectTree({
         <li key={p.id}>
           <div className={`pp-card${p.active ? "" : " pp-inactive"}`} data-testid="project-card">
             <header>
+              {children.length > 0 ? (
+                <button
+                  type="button"
+                  className="pp-tree-toggle"
+                  aria-expanded={expanded.has(p.id)}
+                  aria-label={`${expanded.has(p.id) ? "Collapse" : "Expand"} ${p.name}`}
+                  title={`${children.length} subproject${children.length === 1 ? "" : "s"}`}
+                  onClick={() => onToggle(p.id, !expanded.has(p.id))}
+                >
+                  {expanded.has(p.id) ? "▾" : "▸"}
+                </button>
+              ) : (
+                <span className="pp-tree-toggle" aria-hidden />
+              )}
               <Link to={`/projects/${p.id}`}>{p.name}</Link>
               {p.projectType && (
                 <Badge className="pp-b-type" title="Project type">
@@ -47,11 +66,53 @@ function ProjectTree({
             </header>
             {p.description && <p className="pp-hint pp-description">{p.description}</p>}
           </div>
-          {children.length > 0 && <ProjectTree nodes={children} onEdit={onEdit} />}
+          {children.length > 0 && expanded.has(p.id) && (
+            <ProjectTree nodes={children} expanded={expanded} onToggle={onToggle} onEdit={onEdit} />
+          )}
         </li>
       ))}
     </ul>
   );
+}
+
+/**
+ * Projects the signed-in user has expanded in the tree, stored in their
+ * profile so it is the same after signing in again. Collapsed by default.
+ */
+function useExpandedProjects(onError: (err: unknown) => void) {
+  const { user, updateUser } = useAuth();
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(
+    () => new Set(user?.preferences?.expandedProjectIds ?? []),
+  );
+  // Saves run one after another, so the last change is the one that is kept.
+  const saving = useRef(Promise.resolve());
+  const save = useCallback(
+    (next: ReadonlySet<string>) => {
+      setExpanded(next);
+      saving.current = saving.current
+        .then(() => api.users.setPreferences({ expandedProjectIds: [...next] }))
+        .then(updateUser, onError);
+    },
+    [updateUser, onError],
+  );
+  const toggle = useCallback(
+    (projectId: string, open: boolean) => {
+      const next = new Set(expanded);
+      if (open) next.add(projectId);
+      else next.delete(projectId);
+      save(next);
+    },
+    [expanded, save],
+  );
+  /** Expand the projects above a project, so a new or moved project is in view. */
+  const reveal = useCallback(
+    (projects: ProjectSummary[], projectId: string) => {
+      const missing = ancestorIds(projects, projectId).filter((id) => !expanded.has(id));
+      if (missing.length > 0) save(new Set([...expanded, ...missing]));
+    },
+    [expanded, save],
+  );
+  return { expanded, toggle, reveal };
 }
 
 export function ProjectsPage() {
@@ -63,6 +124,12 @@ export function ProjectsPage() {
   const [showInactive, setShowInactive] = useState(false);
   const [editing, setEditing] = useState<ProjectSummary | null>(null);
   const { busy, error, run } = useAction();
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const onSaveError = useCallback(
+    (err: unknown) => setSaveError(err instanceof Error ? err.message : String(err)),
+    [],
+  );
+  const { expanded, toggle, reveal } = useExpandedProjects(onSaveError);
 
   const reload = useCallback(() => run(async () => setProjects(await api.projects.list())), [run]);
   useEffect(() => void reload(), [reload]);
@@ -81,7 +148,7 @@ export function ProjectsPage() {
           Sign out
         </button>
       </header>
-      <ErrorText error={error} />
+      <ErrorText error={error ?? saveError} />
       {inactiveCount > 0 && (
         <label className="pp-check">
           <input
@@ -93,16 +160,28 @@ export function ProjectsPage() {
         </label>
       )}
       {projects?.length === 0 && <Empty>No projects yet.</Empty>}
-      <ProjectTree nodes={buildProjectTree(shown)} onEdit={setEditing} />
+      <ProjectTree
+        nodes={buildProjectTree(shown)}
+        expanded={expanded}
+        onToggle={toggle}
+        onEdit={setEditing}
+      />
       <form
         className="pp-row"
         onSubmit={(e) => {
           e.preventDefault();
           void run(async () => {
-            await api.projects.create({ name, projectType, parentProjectId, description: "" });
+            const created = await api.projects.create({
+              name,
+              projectType,
+              parentProjectId,
+              description: "",
+            });
             setName("");
             setProjectType("");
-            setProjects(await api.projects.list());
+            const list = await api.projects.list();
+            setProjects(list);
+            reveal(list, created.id);
           });
         }}
       >
@@ -141,7 +220,11 @@ export function ProjectsPage() {
           onClose={() => setEditing(null)}
           onSaved={() => {
             setEditing(null);
-            void reload();
+            void run(async () => {
+              const list = await api.projects.list();
+              setProjects(list);
+              reveal(list, editing.id);
+            });
           }}
         />
       )}

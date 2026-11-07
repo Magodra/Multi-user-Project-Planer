@@ -48,6 +48,17 @@ describe.each(serviceBackends)("services on $name", (backend) => {
   }
 
   describe("projects and plans", () => {
+    it("keeps a user's preferences across sign-ins, for that user only", async () => {
+      expect((await f.services.users.get(f.alice.user.id))?.preferences).toBeUndefined();
+      const prefs = { expandedProjectIds: [f.project.id] };
+      expect((await f.services.users.setPreferences(f.alice, prefs)).preferences).toEqual(prefs);
+      expect((await f.services.users.get(f.alice.user.id))?.preferences).toEqual(prefs);
+      expect((await f.services.users.get(f.bob.user.id))?.preferences).toBeUndefined();
+      // Other changes to the user keep the preferences.
+      await f.services.users.setUserParties(f.admin, f.alice.user.id, []);
+      expect((await f.services.users.get(f.alice.user.id))?.preferences).toEqual(prefs);
+    });
+
     it("creates default definitions, tracks and roles", async () => {
       const defs = await f.services.projects.listDefinitions(f.admin, f.project.id);
       expect(defs.map((d) => d.track).sort()).toEqual(["AGREED", "CURRENT", "ESTIMATED"]);

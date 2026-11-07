@@ -6,6 +6,7 @@ import type {
   Role,
   SetupInput,
   User,
+  UserPreferences,
 } from "@planning/shared";
 import { ConflictError, ForbiddenError, ValidationError } from "../domain/errors.js";
 import type { StorageAdapter } from "../storage/StorageAdapter.js";
@@ -147,6 +148,15 @@ export class UserService {
         details: { partyIds },
       });
       return toPublicUser(saved);
+    });
+  }
+
+  /** Store the signed-in user's own UI settings (UI state: not audited, like workspaces). */
+  async setPreferences(ctx: ServiceContext, preferences: UserPreferences): Promise<PublicUser> {
+    return this.storage.transaction(async (tx) => {
+      const user = await tx.get("user", ctx.user.id);
+      if (!user) throw new ValidationError(`Unknown user ${ctx.user.id}`);
+      return toPublicUser(await tx.save("user", touch(user, ctx, { preferences })));
     });
   }
 

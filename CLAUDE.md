@@ -195,7 +195,7 @@ Unit and integration tests live next to the code as `*.test.ts`.
 | **Timeline** | User-defined timeline that items are dragged into. |
 | **Workspace/View** | The user's layout of open panels (plans, timelines, calendars), per user and project, plus `viewState` (UI state outside the panel layout, e.g. which projects are expanded in the Project panel's structure tree). |
 | **ReportDefinition** | Saved report setup that can be run repeatedly. |
-| **User / Role / Party** | Users, roles per project/plan, and parties (organisations/teams) that approve. |
+| **User / Role / Party** | Users, roles per project/plan, and parties (organisations/teams) that approve. A user has `preferences` (own UI settings kept across sign-ins, e.g. the projects page's expanded projects). |
 | **AuditLog** | Immutable log of all changes and approvals. |
 
 ### Task kinds
@@ -216,6 +216,7 @@ There is one item entity, the **Task**. Its kind follows from its data:
 
 - A project's parent can be changed, but never to itself or one of its own subprojects (`assertValidProjectParent`).
 - Creating a subproject, or moving a project under another one, requires `project.admin` on the child **and** on the new parent.
+- The projects page shows the hierarchy as an expandable tree, collapsed by default. The expanded projects are stored in the user's profile (`User.preferences.expandedProjectIds`, `PUT /api/users/me/preferences`; UI state, not audited), so they are the same after signing in again. Creating a subproject or moving a project expands the tree down to it.
 - **Inactive** projects keep all their data and stay fully usable; the projects page hides them, together with all their subprojects (active or not), unless "Show inactive projects" is checked. Deactivating a project does not change its subprojects' own active flag.
 - Projects stored before these fields existed read as top-level, untyped and active (`normalizeProject`).
 

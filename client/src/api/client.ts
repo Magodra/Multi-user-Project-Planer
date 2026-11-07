@@ -54,6 +54,7 @@ import type {
   UpdateProjectInput,
   UpdateTaskInput,
   UpdateTimelineInput,
+  UserPreferences,
   Workspace,
 } from "@planning/shared";
 import { apiUrl } from "../config";
@@ -128,6 +129,9 @@ export const api = {
   },
   users: {
     list: () => get<PublicUser[]>("/api/users"),
+    /** The signed-in user's own UI settings. */
+    setPreferences: (preferences: UserPreferences) =>
+      put<PublicUser>("/api/users/me/preferences", preferences),
   },
   projects: {
     list: () => get<ProjectSummary[]>("/api/projects"),

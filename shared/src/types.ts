@@ -302,6 +302,14 @@ export interface User extends Versioned {
   globalRoles: Role[];
   partyIds: UUID[];
   externalGroups: string[];
+  /** The user's own UI settings, kept across sign-ins. Missing on users stored before it existed. */
+  preferences?: UserPreferences;
+}
+
+/** UI settings a user keeps across sign-ins. */
+export interface UserPreferences {
+  /** Projects expanded in the projects page's tree (default: none). */
+  expandedProjectIds: UUID[];
 }
 
 export type PublicUser = Omit<User, "passwordHash">;

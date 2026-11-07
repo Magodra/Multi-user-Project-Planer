@@ -14,6 +14,8 @@ interface AuthState {
   user: PublicUser | null;
   signIn(result: LoginResult): void;
   signOut(): Promise<void>;
+  /** Replace the signed-in user, e.g. after saving preferences. */
+  updateUser(user: PublicUser): void;
 }
 
 const AuthContext = createContext<AuthState | null>(null);
@@ -33,6 +35,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
   }, []);
 
+  const updateUser = useCallback((next: PublicUser) => setUser(next), []);
+
   useEffect(() => {
     setUnauthorizedHandler(() => {
       setToken(null);
@@ -41,7 +45,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => setUnauthorizedHandler(null);
   }, []);
 
-  const value = useMemo(() => ({ user, signIn, signOut }), [user, signIn, signOut]);
+  const value = useMemo(
+    () => ({ user, signIn, signOut, updateUser }),
+    [user, signIn, signOut, updateUser],
+  );
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 

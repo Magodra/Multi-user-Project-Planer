@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ProjectSummary } from "@planning/shared";
 import {
+  ancestorIds,
   buildProjectTree,
   parentOptions,
   projectPath,
@@ -24,6 +25,11 @@ describe("project tree", () => {
     expect(subtreeIds(projects, "b")).toEqual(new Set(["b", "c"]));
     expect(parentOptions(projects, subtreeIds(projects, "b"))).toEqual([{ id: "a", label: "A" }]);
     expect(projectPath(projects, "c")).toBe("A / B / C");
+  });
+
+  it("lists the projects above a project, to expand the tree down to it", () => {
+    expect(ancestorIds(projects, "c")).toEqual(["b", "a"]);
+    expect(ancestorIds(projects, "a")).toEqual([]);
   });
 });
 
