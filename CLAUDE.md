@@ -170,6 +170,7 @@ Rules that make `file://` work:
   /scripts         migrate, migrate:make
 /shared/src        types, zod schemas, API shapes, /time, /domain (getItemKind)
 /tests/e2e         Playwright (hosted + file:// projects)
+/docs              getting started, user guide, server administration (keep in step with features)
 config.example.json, config.dev.json
 ```
 
