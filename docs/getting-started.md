@@ -13,7 +13,7 @@ No database is needed: the development setup stores its data in files.
 
 ```sh
 git clone <repository-url>
-cd Multi-user-Project-Planer
+cd Multi-user-Project-Planner
 npm install
 npm run dev
 ```
